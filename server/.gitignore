@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+**/Data/*
+!src/Ground43.Api/Data/*.cs
+artifacts/
+*.user
+*.log
+appsettings.Production.json

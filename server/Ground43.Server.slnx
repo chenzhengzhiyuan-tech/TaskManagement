@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Ground43.Api/Ground43.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ground43.Api.Tests/Ground43.Api.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Ground43.PrepareCleanDatabase/Ground43.PrepareCleanDatabase.csproj" />
+  </Folder>
+</Solution>

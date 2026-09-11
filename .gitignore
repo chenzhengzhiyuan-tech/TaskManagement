@@ -1,0 +1,68 @@
+# Local toolchains and IDE files
+.dotnet/
+.vscode/
+.idea/
+*.user
+*.suo
+*.log
+*.tmp
+
+# Frontend dependencies and generated output
+client/node_modules/
+client/dist/
+client/playwright-report/
+client/test-results/
+
+# .NET and packaged application output
+**/bin/
+**/obj/
+server/src/Ground43.Api/wwwroot/
+server/artifacts/
+
+# Runtime data and credentials
+**/Data/*
+!server/src/Ground43.Api/Data/*.cs
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/appsettings.Production.json
+.env
+.env.*
+!.env.example
+
+# One-time machine-specific maintenance
+server/deploy/reset-live-*.ps1
+server/deploy/RESET_*.md
+
+# Historical release copies and generated research artifacts
+Ground43-platform-v*/
+lan-validation/
+research_build/
+*.zip
+*.inspect.ndjson
+prd-v03-extract.txt
+create-requirement-diagnostic.png
+integration-fullstack.png
+
+# Only public source roots belong in this repository.
+/*
+!/.gitattributes
+!/.gitignore
+!/README.md
+!/client/
+!/server/
+/client/*.md
+/server/*.md
+/server/deploy/*.md
+/server/src/**/*.http
+/client/screenshots/
+/client/src/assets/
+/client/public/*.png
+/client/*-check.mjs
+/client/*diagnos*.cjs
+/client/*smoke.cjs
+*.docx
+*.xlsx
+*.xls
+*.bak
+*.bundle
