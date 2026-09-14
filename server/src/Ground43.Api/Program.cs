@@ -43,6 +43,8 @@ builder.Services.AddScoped<DistributedJobLock>();
 builder.Services.AddScoped<IterationRolloverService>();
 builder.Services.AddScoped<ReviewNotificationService>();
 builder.Services.AddScoped<AssignmentNotificationService>();
+builder.Services.AddScoped<CommentNotificationService>();
+builder.Services.AddScoped<CommentService>();
 builder.Services.AddSingleton<SessionTokenService>();
 builder.Services.AddSingleton<AttachmentStorage>();
 builder.Services.AddHttpClient<IWeComNotifier, WeComNotifier>();

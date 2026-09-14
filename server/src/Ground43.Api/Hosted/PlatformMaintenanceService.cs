@@ -65,6 +65,13 @@ public sealed class PlatformMaintenanceService(IServiceScopeFactory scopes, ILog
         var uploadIds = uploads.Where(x => x.ExpiresAt <= now).Select(x => x.Id).ToArray();
         foreach (var id in uploadIds) storage.DeleteUpload(id);
         await db.UploadSessions.Where(x => uploadIds.Contains(x.Id) && x.CompletedAt == null).ExecuteDeleteAsync(ct);
+        // Only unpublished comment images expire; historical requirement/comment images are retained.
+        var drafts = await db.Attachments.AsNoTracking().Where(x => x.ForComment && x.CommentId == null).ToListAsync(ct);
+        foreach (var draft in drafts.Where(x => x.CreatedAt < now.AddDays(-1)))
+        {
+            var deleted = await db.Attachments.Where(x => x.Id == draft.Id && x.ForComment && x.CommentId == null).ExecuteDeleteAsync(ct);
+            if (deleted == 1) storage.DeleteFile(draft.RelativePath);
+        }
     }
 
     private static async Task SendDailyRemindersAsync(AppDbContext db, IWeComNotifier notifier, string publicBaseUrl, DateOnly today, CancellationToken ct)

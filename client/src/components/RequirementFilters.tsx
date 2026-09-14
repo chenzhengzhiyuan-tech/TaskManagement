@@ -21,7 +21,7 @@ function MultiFilter({ label, value, options, onChange }: { label: string; value
   return <div ref={root} className="multi-filter">
     <button className="button button--ghost button--compact" type="button" aria-expanded={open} aria-label={`${label}筛选`} onClick={() => setOpen(!open)}>{selected.length ? `${label} (${selected.length})` : `全部${label}`} ▾</button>
     {open && <div className="multi-filter__menu" role="group" aria-label={`${label}选项`}>
-      <button type="button" onClick={() => onChange('')}>清空（全部）</button>
+      <div className="multi-filter__actions"><button type="button" disabled={!options.length || options.every(option => selected.includes(option.id))} onClick={() => onChange(options.map(option => option.id).join(','))}>全选</button><button type="button" onClick={() => onChange('')}>清空（全部）</button></div>
       {options.map(option => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} onChange={event => onChange(event.target.checked ? [...selected, option.id].join(',') : selected.filter(id => id !== option.id).join(','))} />{option.name}</label>)}
     </div>}
   </div>

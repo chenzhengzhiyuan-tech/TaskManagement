@@ -3,13 +3,15 @@ import type { PropsWithChildren } from 'react'
 import { ApiError, apiBlob, apiRequest, getApiToken, setApiToken } from './api'
 import { initialData } from './data'
 import { clearAttachmentBlobs, deleteAttachmentBlobs, getAttachmentBlob, saveAttachmentBlob } from './attachmentStorage'
-import type { AppData, Attachment, CreateRequirementInput, CustomField, Requirement, RequirementDefaults, RequirementType, StatusDefinition, SystemBranding, User, WorkCalendarDay } from './types'
+import type { AppData, Attachment, Comment, CommentMention, CreateRequirementInput, CustomField, Requirement, RequirementDefaults, RequirementType, StatusDefinition, SystemBranding, User, WorkCalendarDay } from './types'
 import { parentFinalStatusBlockReason } from './utils'
 
 const STORAGE_KEY = 'g43-client-demo-v1'
 const MOCK_SESSION_KEY = 'g43-client-session-v1'
 const DEMO_PASSWORD = 'demo123'
 const API_MODE = import.meta.env.VITE_DATA_MODE === 'api'
+
+export interface CommentOptions { requestId: string; mentions: CommentMention[]; attachmentIds: string[] }
 
 interface OperationResult { ok: boolean; reason?: string }
 interface ApiModule { id: string; name: string; sortOrder: number }
@@ -47,8 +49,8 @@ interface AppStoreValue extends AppData {
   updateRequirement: (id: string, patch: Partial<Requirement>, summary?: string) => Promise<boolean>
   moveRequirementStatus: (id: string, statusId: string) => Promise<OperationResult>
   deleteRequirement: (id: string) => Promise<boolean>
-  addComment: (id: string, content: string) => Promise<void>
-  uploadAttachment: (id: string, file: File, onProgress?: (progress: number) => void) => Promise<Attachment>
+  addComment: (id: string, content: string, options?: CommentOptions) => Promise<void>
+  uploadAttachment: (id: string, file: File, onProgress?: (progress: number) => void, forComment?: boolean) => Promise<Attachment>
   deleteAttachment: (requirementId: string, attachmentId: string) => Promise<OperationResult>
   loadAttachmentBlob: (attachment: Attachment) => Promise<Blob | null>
   setCurrentUser: (id: string) => void
@@ -128,6 +130,7 @@ function nextRequirementTypeColor(types: RequirementType[]) {
 function hasOwn(object: object, key: PropertyKey) { return Object.prototype.hasOwnProperty.call(object, key) }
 
 export function AppStoreProvider({ children }: PropsWithChildren) {
+  const commentImages = useRef(new Map<string, Attachment>())
   const [data, setData] = useState<AppData>(loadMockData)
   const [moduleIds, setModuleIds] = useState<Record<string, string>>({})
   const [authenticated, setAuthenticated] = useState(() => API_MODE ? Boolean(getApiToken()) : sessionStorage.getItem(MOCK_SESSION_KEY) === 'authenticated')
@@ -301,19 +304,29 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     setData((previous) => ({ ...previous, requirements: previous.requirements.filter((item) => item.id !== id).map((item) => item.parentId === id ? { ...item, parentId: null, version: (item.version ?? 1) + 1, updatedAt: nowIso() } : item) })); return true
   }, [currentUser.role, data.requirements, handleApiError])
 
-  const addComment = useCallback(async (id: string, content: string) => {
-    const trimmed = content.trim(); if (!trimmed) return
+  const addComment = useCallback(async (id: string, content: string, options?: CommentOptions) => {
+    if (!content.trim() && !options?.attachmentIds.length) throw new Error('请输入评论或添加图片')
     if (API_MODE) {
-      await apiRequest(`/requirements/${id}/comments`, { method: 'POST', body: JSON.stringify({ content: trimmed }) })
-      const updated = await apiRequest<Requirement>(`/requirements/${id}`)
-      setData((previous) => ({ ...previous, requirements: previous.requirements.map((item) => item.id === id ? updated : item) })); return
+      const created = await apiRequest<Comment>(`/requirements/${id}/comments`, { method: 'POST', body: JSON.stringify({ content, ...options }) })
+      setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id !== id || item.comments.some(comment => comment.id === created.id) ? item : {
+        ...item, comments: [...item.comments, created], updatedAt: created.createdAt, version: (item.version ?? 1) + 1,
+        history: [{ id: created.id, actorId: created.authorId, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: created.createdAt }, ...item.history],
+      }) }))
+      return
     }
-    const timestamp = nowIso(); setData((previous) => ({ ...previous, requirements: previous.requirements.map((requirement) => requirement.id === id ? { ...requirement, version: (requirement.version ?? 1) + 1, updatedAt: timestamp, comments: [...requirement.comments, { id: crypto.randomUUID(), authorId: currentUser.id, content: trimmed, createdAt: timestamp }], history: [{ id: crypto.randomUUID(), actorId: currentUser.id, action: '添加评论', detail: trimmed.length > 30 ? `${trimmed.slice(0, 30)}…` : trimmed, createdAt: timestamp }, ...requirement.history] } : requirement) }))
-  }, [currentUser.id])
+    if (options?.mentions.some(mention => !data.users.some(user => user.id === mention.userId && user.active !== false && user.wecomBound))) throw new Error('只能 @ 已启用且已绑定企微的成员')
+    const timestamp = nowIso()
+    const comment: Comment = { id: options?.requestId ?? crypto.randomUUID(), authorId: currentUser.id, content, createdAt: timestamp,
+      mentions: options?.mentions ?? [], attachments: (options?.attachmentIds ?? []).map(id => commentImages.current.get(id)).filter((image): image is Attachment => Boolean(image)) }
+    setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id !== id || item.comments.some(entry => entry.id === comment.id) ? item : {
+      ...item, version: (item.version ?? 1) + 1, updatedAt: timestamp, comments: [...item.comments, comment],
+      history: [{ id: crypto.randomUUID(), actorId: currentUser.id, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: timestamp }, ...item.history],
+    }) }))
+  }, [currentUser.id, data.users])
 
-  const uploadAttachment = useCallback(async (id: string, file: File, onProgress?: (progress: number) => void) => {
+  const uploadAttachment = useCallback(async (id: string, file: File, onProgress?: (progress: number) => void, forComment = false) => {
     if (API_MODE) {
-      const session = await apiRequest<UploadSession>(`/requirements/${id}/attachments/uploads`, { method: 'POST', body: JSON.stringify({ fileName: file.name, contentType: file.type, totalSize: file.size }) })
+      const session = await apiRequest<UploadSession>(`/requirements/${id}/attachments/uploads`, { method: 'POST', body: JSON.stringify({ fileName: file.name, contentType: file.type, totalSize: file.size, forComment }) })
       for (let index = 0; index < session.totalChunks; index++) {
         const start = index * session.chunkSize; const chunk = file.slice(start, Math.min(file.size, start + session.chunkSize))
         await apiRequest<void>(`/attachments/uploads/${session.uploadId}/chunks/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk })
@@ -321,12 +334,14 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       }
       const completed = await apiRequest<CompleteUpload>(`/attachments/uploads/${session.uploadId}/complete`, { method: 'POST' })
       onProgress?.(100)
+      if (forComment) return completed.attachment
       setData((previous) => ({ ...previous, requirements: previous.requirements.map((item) => item.id === id ? { ...item, attachments: [...item.attachments, completed.attachment], updatedAt: nowIso(), version: (item.version ?? 1) + 1 } : item) }))
       return completed.attachment
     }
     for (const progress of [8, 30, 52, 74, 96, 100]) { onProgress?.(progress); await wait(90) }
     const attachment: Attachment = { id: crypto.randomUUID(), name: file.name, size: file.size, type: file.type, uploadedBy: currentUser.id, createdAt: nowIso() }
     await saveAttachmentBlob(attachment.id, file)
+    if (forComment) { commentImages.current.set(attachment.id, attachment); return attachment }
     setData((previous) => ({ ...previous, requirements: previous.requirements.map((item) => item.id === id ? { ...item, attachments: [...item.attachments, attachment], updatedAt: nowIso(), version: (item.version ?? 1) + 1 } : item) }))
     return attachment
   }, [currentUser.id])

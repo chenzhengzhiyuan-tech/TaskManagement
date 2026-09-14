@@ -14,7 +14,8 @@ public static class Mapping
     public static SystemBrandingDto ToDto(this SystemBrandingEntity entity) => new(entity.ProjectName, entity.LoginBackgroundUrl, entity.UpdatedAt);
     public static WorkCalendarDto ToDto(this WorkCalendarEntity entity) => new(entity.Date.ToString("yyyy-MM-dd"), entity.IsWorkday, entity.Note);
     public static IterationDto ToDto(this IterationEntity entity) => new(entity.Id, entity.Name, entity.StartDate.ToString("yyyy-MM-dd"), entity.EndDate.ToString("yyyy-MM-dd"), entity.State, entity.Goal);
-    public static CommentDto ToDto(this CommentEntity entity) => new(entity.Id.ToString(), entity.AuthorId, entity.Content, entity.CreatedAt);
+    public static CommentDto ToDto(this CommentEntity entity, IEnumerable<AttachmentEntity>? attachments = null) => new(entity.Id.ToString(), entity.AuthorId, entity.Content, entity.CreatedAt,
+        JsonSerializer.Deserialize<CommentMention[]>(entity.MentionsJson ?? "[]") ?? [], (attachments ?? []).Where(x => x.CommentId == entity.Id).OrderBy(x => x.CreatedAt).Select(ToDto).ToArray());
     public static HistoryDto ToDto(this HistoryEntity entity) => new(entity.Id.ToString(), entity.ActorId, entity.Action, entity.Detail, entity.CreatedAt);
     public static AttachmentDto ToDto(this AttachmentEntity entity) => new(entity.Id.ToString(), entity.Name, entity.Size, entity.ContentType, entity.UploadedById, entity.CreatedAt, $"/api/attachments/{entity.Id}", $"/api/attachments/{entity.Id}?download=true");
     public static CustomFieldDto ToDto(this CustomFieldEntity entity) => new(entity.Id, entity.Name, entity.Type, entity.Required, entity.Enabled, DeserializeStringArray(entity.OptionsJson), entity.SortOrder);
@@ -22,9 +23,9 @@ public static class Mapping
         entity.Id, entity.Title, entity.Module, entity.Priority, entity.StatusId, entity.AssigneeId,
         entity.CreatorId, entity.IterationId, entity.ParentId, entity.ReviewerId, entity.RequirementTypeId, entity.DueDate?.ToString("yyyy-MM-dd"), entity.Description,
         entity.CreatedAt, entity.UpdatedAt, entity.Version, ParseObject(entity.CustomValuesJson),
-        entity.Comments.OrderBy(x => x.CreatedAt).Select(ToDto).ToArray(),
+        entity.Comments.OrderBy(x => x.CreatedAt).Select(comment => comment.ToDto(entity.Attachments)).ToArray(),
         entity.History.OrderByDescending(x => x.CreatedAt).Select(ToDto).ToArray(),
-        entity.Attachments.OrderByDescending(x => x.CreatedAt).Select(ToDto).ToArray(), entity.GetAssigneeIds());
+        entity.Attachments.Where(x => !x.ForComment).OrderByDescending(x => x.CreatedAt).Select(ToDto).ToArray(), entity.GetAssigneeIds());
 
     public static JsonElement ParseObject(string? json)
     {

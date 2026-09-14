@@ -65,6 +65,24 @@ public sealed class DatabaseInitializer(AppDbContext db, PasswordService passwor
     {
         if (!db.Database.IsSqlite()) return;
         var connection=db.Database.GetDbConnection(); if(connection.State!=System.Data.ConnectionState.Open)await connection.OpenAsync(cancellationToken);
+        foreach (var (table, column, definition) in new[] {
+            ("Comments", "MentionsJson", "TEXT NULL"),
+            ("Attachments", "CommentId", "TEXT NULL"),
+            ("Attachments", "ForComment", "INTEGER NOT NULL DEFAULT 0"),
+            ("UploadSessions", "ForComment", "INTEGER NOT NULL DEFAULT 0") })
+        {
+            var present = false;
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = $"PRAGMA table_info('{table}')";
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken)) if (reader.GetString(1) == column) present = true;
+            }
+            // All identifiers and definitions above are fixed source constants.
+#pragma warning disable EF1002
+            if (!present) await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition}", cancellationToken);
+#pragma warning restore EF1002
+        }
         var userColumns=new HashSet<string>(StringComparer.OrdinalIgnoreCase);await using(var userCommand=connection.CreateCommand()){userCommand.CommandText="PRAGMA table_info('Users')";await using var userReader=await userCommand.ExecuteReaderAsync(cancellationToken);while(await userReader.ReadAsync(cancellationToken))userColumns.Add(userReader.GetString(1));}
         if(!userColumns.Contains("WeComEmail"))await db.Database.ExecuteSqlRawAsync("""ALTER TABLE "Users" ADD COLUMN "WeComEmail" TEXT NULL""",cancellationToken);
         await db.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_Users_WeComUserId" ON "Users" ("WeComUserId")""",cancellationToken);

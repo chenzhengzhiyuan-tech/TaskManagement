@@ -28,6 +28,9 @@ namespace Ground43.Api.Migrations
 
             modelBuilder.Entity("Ground43.Api.Data.AttachmentEntity", b =>
                 {
+                    b.Property<Guid?>("CommentId").HasColumnType("TEXT");
+                    b.Property<bool>("ForComment").HasColumnType("INTEGER");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
@@ -111,6 +114,8 @@ namespace Ground43.Api.Migrations
 
             modelBuilder.Entity("Ground43.Api.Data.CommentEntity", b =>
                 {
+                    b.Property<string>("MentionsJson").HasColumnType("TEXT");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
@@ -547,6 +552,8 @@ namespace Ground43.Api.Migrations
 
             modelBuilder.Entity("Ground43.Api.Data.UploadSessionEntity", b =>
                 {
+                    b.Property<bool>("ForComment").HasColumnType("INTEGER");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");

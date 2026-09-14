@@ -4,6 +4,8 @@ import { Check, GripVertical, LockKeyhole, MessageSquare, UserRound } from 'luci
 import { useMemo, useState } from 'react'
 import { useAppStore } from '../store'
 import { useRequirementFilter } from '../useRequirementFilter'
+import { useIterationFilter } from '../useIterationFilter'
+import { comparePriorityAndNumber } from '../requirementSort'
 import { formatDate, getUser, priorityLabel, requirementMatches } from '../utils'
 
 interface BoardPageProps {
@@ -12,7 +14,7 @@ interface BoardPageProps {
 
 export function BoardPage({ onOpenRequirement }: BoardPageProps) {
   const { requirements, statuses, users, currentUser, moveRequirementStatus } = useAppStore()
-  const [iterationId, setIterationId] = useRequirementFilter(currentUser.id, 'iteration')
+  const [iterationId, setIterationId] = useIterationFilter(currentUser.id)
   const [assigneeId, setAssigneeId] = useRequirementFilter(currentUser.id, 'assignee')
   const [query, setQuery] = useRequirementFilter(currentUser.id, 'query')
   const [statusId, setStatusId] = useRequirementFilter(currentUser.id, 'status')
@@ -51,7 +53,7 @@ export function BoardPage({ onOpenRequirement }: BoardPageProps) {
 
       <div className="kanban" role="list">
         {statuses.map((status) => {
-          const cards = visible.filter((item) => item.statusId === status.id)
+          const cards = visible.filter((item) => item.statusId === status.id).sort(comparePriorityAndNumber)
           const locked = currentUser.role === 'developer' && status.protected
           return (
             <section

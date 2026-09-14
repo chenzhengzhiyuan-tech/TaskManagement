@@ -27,6 +27,7 @@ public sealed class ReviewNotificationWorker(IServiceScopeFactory scopes, ILogge
         {
             await scope.ServiceProvider.GetRequiredService<ReviewNotificationService>().DispatchAsync(ct);
             await scope.ServiceProvider.GetRequiredService<AssignmentNotificationService>().DispatchAsync(ct);
+            await scope.ServiceProvider.GetRequiredService<CommentNotificationService>().DispatchAsync(ct);
         }
         finally
         {

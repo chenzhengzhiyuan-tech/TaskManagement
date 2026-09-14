@@ -35,7 +35,11 @@ export interface Iteration {
   goal: string
 }
 
+export interface CommentMention { userId: string; name: string; start: number; length: number }
+
 export interface Comment {
+  mentions?: CommentMention[]
+  attachments?: Attachment[]
   id: string
   authorId: string
   content: string

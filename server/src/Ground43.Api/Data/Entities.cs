@@ -150,6 +150,7 @@ public sealed class RequirementEntity
 
 public sealed class CommentEntity
 {
+    public string? MentionsJson { get; set; }
     public Guid Id { get; set; }
     public string RequirementId { get; set; } = default!;
     public string AuthorId { get; set; } = default!;
@@ -173,6 +174,8 @@ public sealed class HistoryEntity
 
 public sealed class AttachmentEntity
 {
+    public bool ForComment { get; set; }
+    public Guid? CommentId { get; set; }
     public Guid Id { get; set; }
     public string RequirementId { get; set; } = default!;
     public string Name { get; set; } = default!;
@@ -188,6 +191,7 @@ public sealed class AttachmentEntity
 
 public sealed class UploadSessionEntity
 {
+    public bool ForComment { get; set; }
     public Guid Id { get; set; }
     public string RequirementId { get; set; } = default!;
     public string FileName { get; set; } = default!;

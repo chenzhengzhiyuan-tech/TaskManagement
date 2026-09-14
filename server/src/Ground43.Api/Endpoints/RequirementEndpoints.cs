@@ -61,7 +61,14 @@ public static class RequirementEndpoints
         var matchedIds=filtered.Select(x=>x.Id);var rootIds=filtered.Select(x=>x.ParentId??x.Id).Distinct();var rootCount=await rootIds.CountAsync(ct);var requirementCount=await filtered.CountAsync(ct);
         IQueryable<RequirementEntity> roots=db.Requirements.AsNoTracking().Where(x=>rootIds.Contains(x.Id));
         List<string> pageRootIds;
-        if(db.Database.IsSqlite())
+        if (sort == "status")
+        {
+            var rootList = await roots.ToListAsync(ct);
+            pageRootIds = rootList.OrderBy(x => RequirementSort.StatusRank(x.StatusId))
+                .ThenBy(x => RequirementSort.PriorityRank(x.Priority)).ThenBy(x => RequirementSort.Number(x.Id))
+                .ThenBy(x => x.Id, StringComparer.Ordinal).Skip((page - 1) * pageSize).Take(pageSize).Select(x => x.Id).ToList();
+        }
+        else if(db.Database.IsSqlite())
         {
             var rootList=await roots.ToListAsync(ct);
             var userNames=await db.Users.AsNoTracking().ToDictionaryAsync(x=>x.Id,x=>x.Name,ct);
@@ -223,15 +230,8 @@ public static class RequirementEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> AddCommentAsync(string id, CreateCommentRequest request, HttpContext context, AppDbContext db, CancellationToken ct)
-    {
-        var content = request.Content.Trim(); if (string.IsNullOrWhiteSpace(content)) return Results.BadRequest(new { message = "评论不能为空" });
-        var entity = await db.Requirements.FindAsync([id], ct); if (entity is null) return Results.NotFound();
-        var now = DateTimeOffset.UtcNow; var userId = context.User.UserId();
-        var comment = new CommentEntity { Id = Guid.NewGuid(), RequirementId = id, AuthorId = userId, Content = content, CreatedAt = now };
-        db.Comments.Add(comment); db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = id, ActorId = userId, Action = "添加评论", Detail = content.Length > 60 ? content[..60] + "…" : content, CreatedAt = now });
-        entity.UpdatedAt = now; entity.Version++; await db.SaveChangesAsync(ct); return Results.Created($"/api/requirements/{id}/comments/{comment.Id}", comment.ToDto());
-    }
+    private static Task<IResult> AddCommentAsync(string id, CreateCommentRequest request, HttpContext context, CommentService comments, CancellationToken ct)
+        => comments.CreateAsync(id, request, context.User.UserId(), ct);
 
     private static async Task<IResult?> ValidateAsync(RequirementEntity? current, string module, string priority, string statusId, string? assigneeId, string? iterationId, string? parentId, string? reviewerId, Guid? requirementTypeId, HttpContext context, AppDbContext db, CancellationToken ct)
     {

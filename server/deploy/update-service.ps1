@@ -40,6 +40,29 @@ foreach ($required in @($configPath, $databasePath)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required production file is missing: $required" }
 }
 $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+$productionConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$storageSetting = [string]$productionConfig.Storage.RootPath
+if ([string]::IsNullOrWhiteSpace($storageSetting)) { $storageSetting = 'Data' }
+$storagePath = if ([IO.Path]::IsPathRooted($storageSetting)) { [IO.Path]::GetFullPath($storageSetting) } else { [IO.Path]::GetFullPath((Join-Path $resolvedInstall $storageSetting)) }
+if (-not (Test-Path -LiteralPath $storagePath -PathType Container)) { throw 'Production attachment storage is missing.' }
+if ($backupParent.StartsWith($storagePath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or $backupParent -eq $storagePath) { throw 'Attachment storage must not contain the backup directory.' }
+if ($storagePath.StartsWith($resolvedInstall + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    $protectedEntries += $storagePath.Substring($resolvedInstall.Length + 1).Split('\')[0]
+} elseif ($storagePath -eq $resolvedInstall) { throw 'Attachment storage must not be the application root.' }
+
+function Backup-VerifiedDirectory([string]$Source, [string]$Destination) {
+    $entries = @(Get-Item -LiteralPath $Source) + @(Get-ChildItem -LiteralPath $Source -Recurse -Force)
+    if ($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Data backup does not support linked files or directories.' }
+    Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+    $manifest = foreach ($file in $entries | Where-Object { -not $_.PSIsContainer }) {
+        $relative = $file.FullName.Substring($Source.TrimEnd('\').Length + 1)
+        $copy = Join-Path $Destination $relative
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        if (-not (Test-Path -LiteralPath $copy -PathType Leaf) -or (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash -ne $hash) { throw "Data backup verification failed: $relative" }
+        [pscustomobject]@{ Path = $relative; Length = $file.Length; SHA256 = $hash }
+    }
+    @($manifest) | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath ($Destination + '-manifest.json') -Encoding UTF8
+}
 $sourceIndex = Get-Content -LiteralPath (Join-Path $resolvedPublish 'wwwroot\index.html') -Raw
 $sourceScript = [regex]::Match($sourceIndex, '<script[^>]+src="(?<src>[^"]+\.js)"').Groups['src'].Value
 if ([string]::IsNullOrWhiteSpace($sourceScript)) { throw 'Cannot identify client asset in publish package.' }
@@ -74,6 +97,10 @@ try {
         if (Test-Path -LiteralPath $sqliteFile) { Copy-Item -LiteralPath $sqliteFile -Destination $databaseBackup -Force }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $databaseBackup 'ground43-lan.db'))) { throw 'Database backup failed.' }
+    Backup-VerifiedDirectory (Join-Path $resolvedInstall 'Data') (Join-Path $backupPath 'data-before-update')
+    if ($storagePath.TrimEnd('\') -ne (Join-Path $resolvedInstall 'Data')) {
+        Backup-VerifiedDirectory $storagePath (Join-Path $backupPath 'attachments-before-update')
+    }
 
     $deploymentStarted = $true
     foreach ($entry in $packageEntries) {

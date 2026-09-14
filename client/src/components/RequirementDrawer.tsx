@@ -12,7 +12,6 @@ import {
   MessageSquare,
   Paperclip,
   Save,
-  Send,
   Trash2,
   Upload,
   X,
@@ -24,6 +23,7 @@ import { formatDate, getUser, parentFinalStatusBlockReason, priorityLabel } from
 import { ConfirmDialog } from './ConfirmDialog'
 import { ParentRequirementPicker } from './ParentRequirementPicker'
 import { ChildRequirementPicker } from './ChildRequirementPicker'
+import { CommentsPanel } from './CommentsPanel'
 
 interface RequirementDrawerProps {
   requirementId: string | null
@@ -44,18 +44,18 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
     currentUser,
     updateRequirement,
     deleteRequirement,
-    addComment,
     uploadAttachment,
     loadAttachmentBlob,
     deleteAttachment,
   } = useAppStore()
   const requirement = requirements.find((item) => item.id === requirementId)
   const activeUsers = users.filter((user) => user.active !== false)
-  const [tab, setTab] = useState<DrawerTab>('overview')
+  const [tab, setTab] = useState<DrawerTab>(() => new URLSearchParams(window.location.search).has('comment') ? 'comments' : 'overview')
   const [expanded, setExpanded] = useState(false)
   const [title, setTitle] = useState(requirement?.title ?? '')
   const [description, setDescription] = useState(requirement?.description ?? '')
-  const [comment, setComment] = useState('')
+  const [commentDirty, setCommentDirty] = useState(false)
+  const [descriptionEditing, setDescriptionEditing] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -82,7 +82,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
   )
 
   useEffect(() => {
-    if (!requirementId) return
+    if (!requirementId || tab === 'comments') return
     const paste = (event: ClipboardEvent) => {
       const target = event.target
       if (target instanceof Element && target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')) return
@@ -102,7 +102,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
   const iteration = iterations.find((item) => item.id === requirement.iterationId)
 
   function requestClose() {
-    if (dirty && !window.confirm('存在未保存的修改，确定关闭吗？')) return
+    if ((dirty || commentDirty) && !window.confirm('存在未保存的修改，确定关闭吗？')) return
     onClose()
   }
 
@@ -110,7 +110,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
     if (!title.trim()) { setMessage('需求标题不能为空'); return }
     const ok = await updateRequirement(activeId, { title: title.trim(), description }, '更新了标题或需求描述')
     if (!ok) { setMessage('保存失败，数据可能已被其他用户修改'); return }
-    setDirty(false); setMessage('已保存'); window.setTimeout(() => setMessage(null), 1800)
+    setDirty(false); setDescriptionEditing(false); setMessage('已保存'); window.setTimeout(() => setMessage(null), 1800)
   }
 
   async function changeStatus(statusId: string) {
@@ -264,13 +264,13 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
                 </section>
 
                 <section className="detail-section">
-                  <div className="section-heading"><h3>需求描述</h3><span>支持富文本的客户端原型</span></div>
-                  <textarea
-                    className="description-editor"
-                    value={description}
-                    onChange={(event) => { setDescription(event.target.value); setDirty(true) }}
-                    placeholder="输入需求背景、目标和验收说明…"
-                  />
+                  <div className="section-heading"><h3>需求描述</h3>{!descriptionEditing && <button type="button" onClick={() => { setDescription(requirement.description); setDescriptionEditing(true) }}>编辑描述</button>}</div>
+                  {descriptionEditing ? <>
+                    <textarea className="description-editor" aria-label="需求描述" value={description}
+                      onChange={event => { setDescription(event.target.value); setDirty(true) }} placeholder="输入需求背景、目标和验收说明…" />
+                    <div className="description-actions"><button className="button button--primary button--compact" type="button" onClick={() => void saveText()}>保存描述</button>
+                      <button className="button button--ghost button--compact" type="button" onClick={() => { setDescription(requirement.description); setDescriptionEditing(false); setDirty(title !== requirement.title) }}>取消</button></div>
+                  </> : <div className="description-content">{requirement.description || '暂无需求描述'}</div>}
                 </section>
 
                 <section className="detail-section">
@@ -302,21 +302,8 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
               </>
             )}
 
-            {tab === 'comments' && (
-              <section className="comments-panel">
-                <div className="comment-composer">
-                  <span className="avatar avatar--small" style={{ '--avatar-color': currentUser.color } as React.CSSProperties}>{currentUser.initials}</span>
-                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="发表评论，使用 @ 提醒成员…" />
-                  <button className="button button--primary button--compact" type="button" onClick={() => void addComment(requirement.id, comment).then(() => setComment(''))} disabled={!comment.trim()}><Send size={14} />发送</button>
-                </div>
-                <div className="comment-list">
-                  {requirement.comments.length ? requirement.comments.map((item) => {
-                    const author = getUser(users, item.authorId)
-                    return <article key={item.id}><span className="avatar avatar--small" style={{ '--avatar-color': author?.color } as React.CSSProperties}>{author?.initials}</span><div><header><strong>{author?.name}</strong><time>{formatDate(item.createdAt, true)}</time></header><p>{item.content}</p></div></article>
-                  }) : <div className="empty-state empty-state--compact"><MessageSquare size={24} /><strong>还没有评论</strong><span>在上方输入框开始讨论</span></div>}
-                </div>
-              </section>
-            )}
+            <CommentsPanel requirement={requirement} visible={tab === 'comments'} onDirtyChange={setCommentDirty}
+              onOpenImage={attachment => void openAttachment(attachment)} onDownloadImage={attachment => void downloadAttachment(attachment)} />
 
             {tab === 'history' && (
               <section className="timeline">

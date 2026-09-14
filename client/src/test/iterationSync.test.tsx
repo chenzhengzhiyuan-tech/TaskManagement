@@ -22,6 +22,7 @@ let latest: ReturnType<typeof snapshot>
 
 beforeEach(() => {
   vi.useFakeTimers()
+  sessionStorage.clear()
   latest = snapshot()
   vi.mocked(apiRequest).mockImplementation(async (path) => {
     if (path === '/iterations') return latest.iterations
@@ -58,13 +59,13 @@ it('后台轮询同步当前迭代、时间线和需求，同时保留新建需�
   expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/bootstrap')).toHaveLength(2)
 })
 
-it('切回页面时同步迭代，看板保留全部迭代筛选', async () => {
+it('切回页面时同步迭代，看板默认跟随新的当前迭代', async () => {
   await act(async () => { render(<AppStoreProvider><BoardPage onOpenRequirement={() => {}} /></AppStoreProvider>) })
   rollover()
   await act(async () => { window.dispatchEvent(new Event('focus')) })
-  expect(screen.getByRole('button', { name: '迭代筛选' })).toHaveTextContent('全部迭代')
+  expect(screen.getByRole('button', { name: '迭代筛选' })).toHaveTextContent('迭代 (1)')
   fireEvent.click(screen.getByRole('button', { name: '迭代筛选' }))
-  expect(screen.getByRole('checkbox', { name: '20260831-20260904' })).toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: '20260831-20260904' })).toBeChecked()
 })
 
 it('迭代刷新返回较旧快照时，不覆盖已经保存成功的最新任务状态', async () => {

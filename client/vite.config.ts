@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:5080',
+        target: process.env.G43_DEV_API_TARGET || 'http://127.0.0.1:5080',
         changeOrigin: true,
       },
     },

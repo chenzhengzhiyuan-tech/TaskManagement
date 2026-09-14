@@ -29,7 +29,7 @@ public static class AttachmentEndpoints
         if (request.TotalSize <= 0 || request.TotalSize > options.Value.MaxAttachmentBytes) return Results.BadRequest(new { message = "附件大小必须在1字节至500MB之间" });
         var chunkSize = Math.Clamp(request.ChunkSize ?? options.Value.ChunkSizeBytes, 1024 * 1024, 16 * 1024 * 1024);
         var now = DateTimeOffset.UtcNow;
-        var session = new UploadSessionEntity { Id = Guid.NewGuid(), RequirementId = requirementId, FileName = Path.GetFileName(request.FileName), ContentType = request.ContentType, TotalSize = request.TotalSize, ChunkSize = chunkSize, TotalChunks = (int)Math.Ceiling(request.TotalSize / (double)chunkSize), UploadedById = context.User.UserId(), CreatedAt = now, ExpiresAt = now.AddHours(options.Value.UploadSessionHours) };
+        var session = new UploadSessionEntity { Id = Guid.NewGuid(), RequirementId = requirementId, ForComment = request.ForComment, FileName = Path.GetFileName(request.FileName), ContentType = request.ContentType, TotalSize = request.TotalSize, ChunkSize = chunkSize, TotalChunks = (int)Math.Ceiling(request.TotalSize / (double)chunkSize), UploadedById = context.User.UserId(), CreatedAt = now, ExpiresAt = now.AddHours(options.Value.UploadSessionHours) };
         Directory.CreateDirectory(storage.UploadDirectory(session.Id)); db.UploadSessions.Add(session); await db.SaveChangesAsync(ct);
         return Results.Created($"/api/attachments/uploads/{session.Id}", new CreateUploadResponse(session.Id, session.ChunkSize, session.TotalChunks, session.ExpiresAt));
     }
@@ -72,11 +72,11 @@ public static class AttachmentEndpoints
         {
             storage.DeleteFile(relativePath); return Results.BadRequest(new { message = "文件大小或图片格式校验失败" });
         }
-        var entity = new AttachmentEntity { Id = attachmentId, RequirementId = session.RequirementId, Name = session.FileName, Size = session.TotalSize, ContentType = session.ContentType, RelativePath = relativePath, Sha256 = sha, UploadedById = session.UploadedById, CreatedAt = DateTimeOffset.UtcNow };
+        var entity = new AttachmentEntity { ForComment = session.ForComment, Id = attachmentId, RequirementId = session.RequirementId, Name = session.FileName, Size = session.TotalSize, ContentType = session.ContentType, RelativePath = relativePath, Sha256 = sha, UploadedById = session.UploadedById, CreatedAt = DateTimeOffset.UtcNow };
         db.Attachments.Add(entity); session.CompletedAt = DateTimeOffset.UtcNow;
         var requirement = await db.Requirements.FindAsync([session.RequirementId], ct);
-        if (requirement is not null) { requirement.UpdatedAt = DateTimeOffset.UtcNow; requirement.Version++; }
-        db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = session.RequirementId, ActorId = session.UploadedById, Action = "上传附件", Detail = session.FileName, CreatedAt = entity.CreatedAt });
+        if (requirement is not null && !session.ForComment) { requirement.UpdatedAt = DateTimeOffset.UtcNow; requirement.Version++; }
+        if (!session.ForComment) db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = session.RequirementId, ActorId = session.UploadedById, Action = "上传附件", Detail = session.FileName, CreatedAt = entity.CreatedAt });
         await db.SaveChangesAsync(ct); storage.DeleteUpload(uploadId);
         return Results.Ok(new CompleteUploadResponse(entity.ToDto()));
     }
@@ -92,18 +92,20 @@ public static class AttachmentEndpoints
     {
         var attachment = await db.Attachments.FindAsync([id], ct); if (attachment is null) return Results.NotFound();
         if (attachment.UploadedById != context.User.UserId() && !context.User.IsInRole(Roles.Admin)) return Results.Forbid();
+        if (attachment.CommentId != null) return Results.BadRequest(new { message = "评论图片不能单独删除" });
         var requirement = await db.Requirements.FindAsync([attachment.RequirementId], ct);
-        if (requirement is not null) { requirement.Version++; requirement.UpdatedAt = DateTimeOffset.UtcNow; }
+        if (requirement is not null && !attachment.ForComment) { requirement.Version++; requirement.UpdatedAt = DateTimeOffset.UtcNow; }
         db.Attachments.Remove(attachment);
-        db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = attachment.RequirementId, ActorId = context.User.UserId(), Action = "删除附件", Detail = attachment.Name, CreatedAt = DateTimeOffset.UtcNow });
+        if (!attachment.ForComment) db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = attachment.RequirementId, ActorId = context.User.UserId(), Action = "删除附件", Detail = attachment.Name, CreatedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync(ct);
         storage.DeleteFile(attachment.RelativePath);
         return Results.NoContent();
     }
 
-    private static async Task<IResult> DownloadAsync(Guid id, bool? download, AppDbContext db, AttachmentStorage storage, CancellationToken ct)
+    private static async Task<IResult> DownloadAsync(Guid id, bool? download, HttpContext context, AppDbContext db, AttachmentStorage storage, CancellationToken ct)
     {
         var attachment = await db.Attachments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (attachment is null) return Results.NotFound();
+        if (attachment.ForComment && attachment.CommentId == null && attachment.UploadedById != context.User.UserId()) return Results.Forbid();
         var path = storage.FullPath(attachment.RelativePath); if (!File.Exists(path)) return Results.NotFound(new { message = "附件文件不存在" });
         return Results.File(path, attachment.ContentType, download == true ? attachment.Name : null, enableRangeProcessing: true);
     }

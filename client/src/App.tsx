@@ -23,14 +23,19 @@ function App() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createdNotice, setCreatedNotice] = useState('')
   const [globalQuery, setGlobalQuery] = useState('')
+  useEffect(() => {
+    if (!createdNotice) return
+    const timer = window.setTimeout(() => setCreatedNotice(''), 3000)
+    return () => window.clearTimeout(timer)
+  }, [createdNotice])
 
   const openRequirement = useCallback((id: string) => {
     setSelectedRequirementId(id)
-    const url = new URL(window.location.href); url.searchParams.set('requirement', id); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    const url = new URL(window.location.href); url.searchParams.delete('comment'); url.searchParams.set('requirement', id); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
   const closeRequirement = useCallback(() => {
     setSelectedRequirementId(null)
-    const url = new URL(window.location.href); url.searchParams.delete('requirement'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    const url = new URL(window.location.href); url.searchParams.delete('comment'); url.searchParams.delete('requirement'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
   useEffect(() => {
     if (!authenticated) return
@@ -58,7 +63,7 @@ function App() {
     <AppShell page={page} onPageChange={setPage} onNewRequirement={openNew} onGlobalSearch={setGlobalQuery}>
       {pageContent}
       <RequirementDrawer key={selectedRequirementId ?? 'closed'} requirementId={selectedRequirementId} onClose={closeRequirement} onOpenRequirement={openRequirement} />
-      <NewRequirementModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreatedNotice(id); setCreateOpen(false); setPage('requirements'); setGlobalQuery(''); openRequirement(id) }} />
+      <NewRequirementModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreatedNotice(id); setCreateOpen(false); if (page !== 'board') { setPage('requirements'); setGlobalQuery('') } openRequirement(id) }} />
       {createdNotice && <div className="created-notice" role="status"><button type="button" onClick={() => openRequirement(createdNotice)}>创建成功：{createdNotice} · 点击查看</button><button type="button" aria-label="关闭创建提示" onClick={() => setCreatedNotice('')}>×</button></div>}
     </AppShell>
   )

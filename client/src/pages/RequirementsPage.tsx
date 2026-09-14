@@ -30,7 +30,10 @@ interface RequirementsPageProps {
 
 const PAGE_SIZE = 50
 
-type SortKey = 'updated' | 'priority' | 'assignee' | 'due'
+import { useIterationFilter } from '../useIterationFilter'
+import { compareTaskStatus } from '../requirementSort'
+
+type SortKey = 'updated' | 'priority' | 'assignee' | 'due' | 'status'
 
 export function RequirementsPage({ initialQuery, onOpenRequirement }: RequirementsPageProps) {
   const { requirements, statuses, users, iterations, customFields, requirementTypes, mode, currentUser, updateRequirement, queryRequirementTree } = useAppStore()
@@ -38,7 +41,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
   const [statusFilter, setStatusFilter] = useRequirementFilter(currentUser.id, 'status')
   const [assigneeFilter, setAssigneeFilter] = useRequirementFilter(currentUser.id, 'assignee')
   const [priorityFilter, setPriorityFilter] = useRequirementFilter(currentUser.id, 'priority')
-  const [iterationFilter, setIterationFilter] = useRequirementFilter(currentUser.id, 'iteration')
+  const [iterationFilter, setIterationFilter] = useIterationFilter(currentUser.id)
   const [typeFilter, setTypeFilter] = useRequirementFilter(currentUser.id, 'type')
   const [mine, setMine] = useRequirementFilter(currentUser.id, 'mine')
   const [apiTree, setApiTree] = useState<RequirementTreePage | null>(null)
@@ -67,6 +70,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
     && filterMatches(typeFilter, item.requirementTypeId)
 
   const compareRoots = (a: Requirement, b: Requirement) => {
+    if (sort === 'status') return compareTaskStatus(a, b)
     if (sort === 'priority') return priorityRank[b.priority] - priorityRank[a.priority] || b.updatedAt.localeCompare(a.updatedAt)
     if (sort === 'assignee') return (a.assigneeId ? 0 : 1) - (b.assigneeId ? 0 : 1) || (getUser(users, a.assigneeId)?.name ?? '').localeCompare(getUser(users, b.assigneeId)?.name ?? '') || b.updatedAt.localeCompare(a.updatedAt)
     if (sort === 'due') return (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || b.updatedAt.localeCompare(a.updatedAt)
@@ -199,7 +203,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
       </RequirementFilters>
       {batchOpen && <BatchCreateModal onClose={() => setBatchOpen(false)} onOpen={id => { setBatchOpen(false); onOpenRequirement(id) }} />}
 
-        <div className="list-context-bar"><div>{activeFilters > 0 && <button type="button" onClick={clearFilters}><ListFilter size={14} />已启用 {activeFilters} 个筛选 <X size={13} /></button>}</div><label><ArrowDownAZ size={14} />顶层需求排序<select value={sort} onChange={(event) => setSort(event.target.value as SortKey)}><option value="updated">最近更新</option><option value="priority">优先级</option><option value="assignee">处理人</option><option value="due">截止时间</option></select></label></div>
+        <div className="list-context-bar"><div>{activeFilters > 0 && <button type="button" onClick={clearFilters}><ListFilter size={14} />已启用 {activeFilters} 个筛选 <X size={13} /></button>}</div><label><ArrowDownAZ size={14} />顶层需求排序<select value={sort} onChange={(event) => { setSort(event.target.value as SortKey); setPage(1) }}><option value="updated">最近更新</option><option value="priority">优先级</option><option value="status">任务状态</option><option value="assignee">处理人</option><option value="due">截止时间</option></select></label></div>
 
       {selected.length > 0 && <div className="bulk-bar"><strong>已选择 {selected.length} 条</strong><label className="bulk-control"><AssigneePicker label="批量处理人" value={bulkAssignee} users={users} onChange={setBulkAssignee} /><button className="button button--ghost button--compact" type="button" disabled={!bulkAssignee.length} onClick={() => void applyBulkAssignee()}>应用</button></label><label className="bulk-control"><select aria-label="批量迭代" value={bulkIteration} onChange={(event) => setBulkIteration(event.target.value)}><option value="">选择迭代</option>{iterations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="button button--ghost button--compact" type="button" disabled={!bulkIteration} onClick={() => void applyBulkIteration()}>应用</button></label><button className="icon-button icon-button--small" type="button" aria-label="取消批量选择" onClick={() => setSelected([])}><X size={14} /></button></div>}
 

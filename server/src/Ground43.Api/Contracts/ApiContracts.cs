@@ -12,7 +12,8 @@ public sealed record RequirementDefaultsDto(string? Module, string Priority, str
 public sealed record SystemBrandingDto(string ProjectName, string LoginBackgroundUrl, DateTimeOffset UpdatedAt);
 public sealed record WorkCalendarDto(string Date, bool IsWorkday, string? Note);
 public sealed record IterationDto(string Id, string Name, string StartDate, string EndDate, string State, string Goal);
-public sealed record CommentDto(string Id, string AuthorId, string Content, DateTimeOffset CreatedAt);
+public sealed record CommentMention(string UserId, string Name, int Start, int Length);
+public sealed record CommentDto(string Id, string AuthorId, string Content, DateTimeOffset CreatedAt, IReadOnlyList<CommentMention> Mentions, IReadOnlyList<AttachmentDto> Attachments);
 public sealed record HistoryDto(string Id, string ActorId, string Action, string Detail, DateTimeOffset CreatedAt);
 public sealed record AttachmentDto(string Id, string Name, long Size, string Type, string UploadedBy, DateTimeOffset CreatedAt, string Url, string DownloadUrl);
 public sealed record CustomFieldDto(string Id, string Name, string Type, bool Required, bool Enabled, string[] Options, int SortOrder);
@@ -39,7 +40,7 @@ public sealed record UpdateRequirementRequest(
     string? Title, string? Module, string? Priority, string? StatusId, string? AssigneeId,
     bool ClearAssignee, string? IterationId, bool ClearIteration, string? ParentId, bool ClearParent,
     string? ReviewerId, bool ClearReviewer, Guid? RequirementTypeId, bool ClearRequirementType, string? DueDate, bool ClearDueDate, string? Description, JsonElement? CustomValues, long? Version, string? Summary, string[]? AssigneeIds = null);
-public sealed record CreateCommentRequest(string Content);
+public sealed record CreateCommentRequest(string Content, Guid? RequestId = null, CommentMention[]? Mentions = null, Guid[]? AttachmentIds = null);
 public sealed record BatchCreateRequest(Guid RequestId, CreateRequirementRequest[] Items);
 public sealed record CreateModuleRequest(string Name);
 public sealed record CreateRequirementTypeRequest(string Name);
@@ -54,7 +55,7 @@ public sealed record UpdateStatusRequest(string? Name, string? Color, int? SortO
 public sealed record ReorderStatusesRequest(string[] Ids);
 public sealed record CreateCustomFieldRequest(string Name, string Type, bool Required, string[]? Options);
 public sealed record UpdateCustomFieldRequest(string? Name, bool? Required, bool? Enabled, string[]? Options, int? SortOrder);
-public sealed record CreateUploadRequest(string FileName, string ContentType, long TotalSize, int? ChunkSize);
+public sealed record CreateUploadRequest(string FileName, string ContentType, long TotalSize, int? ChunkSize, bool ForComment = false);
 public sealed record CreateUploadResponse(Guid UploadId, int ChunkSize, int TotalChunks, DateTimeOffset ExpiresAt);
 public sealed record CompleteUploadResponse(AttachmentDto Attachment);
 public sealed record ReportSummaryDto(int Total, int Completed, int Open, int Overdue, int CompletionRate, IReadOnlyList<MemberLoadDto> MemberLoad);

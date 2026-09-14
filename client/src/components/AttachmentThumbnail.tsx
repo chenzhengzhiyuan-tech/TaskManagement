@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Attachment } from '../types'
 import { useAppStore } from '../store'
 
-export function AttachmentThumbnail({ attachment, onOpen, onDownload, onDelete }: { attachment: Attachment; onOpen: () => void; onDownload: () => void; onDelete: () => void }) {
+export function AttachmentThumbnail({ attachment, onOpen, onDownload, onDelete }: { attachment: Attachment; onOpen: () => void; onDownload: () => void; onDelete?: () => void }) {
   const root = useRef<HTMLElement>(null)
   const { loadAttachmentBlob } = useAppStore()
   const [url, setUrl] = useState('')
@@ -27,6 +27,6 @@ export function AttachmentThumbnail({ attachment, onOpen, onDownload, onDelete }
       {error ? <span>图片读取失败，点击重试预览</span> : url ? <img src={url} alt={attachment.name} loading="lazy" onError={() => setError(true)} /> : <span>正在加载图片…</span>}
     </button>
     <strong title={attachment.name}>{attachment.name}</strong>
-    <footer><span>{(attachment.size / 1024 / 1024).toFixed(1)} MB</span><button type="button" onClick={onDownload}>下载</button><button type="button" onClick={onDelete} aria-label={`删除图片 ${attachment.name}`}>删除</button></footer>
+    <footer><span>{(attachment.size / 1024 / 1024).toFixed(1)} MB</span><button type="button" onClick={onDownload}>下载</button>{onDelete && <button type="button" onClick={onDelete} aria-label={`删除图片 ${attachment.name}`}>删除</button>}</footer>
   </article>
 }
