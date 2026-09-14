@@ -109,6 +109,18 @@ try {
         if ($entry.PSIsContainer -and (Test-Path -LiteralPath $destination)) { Remove-Item -LiteralPath $destination -Recurse -Force }
         Copy-Item -LiteralPath $entry.FullName -Destination $destination -Recurse -Force
     }
+    # Cached HTML and already-open pages can still reference previous hashed assets.
+    $previousAssets = Join-Path $backupPath 'wwwroot\assets'
+    $installedAssets = Join-Path $resolvedInstall 'wwwroot\assets'
+    if (Test-Path -LiteralPath $previousAssets -PathType Container) {
+        New-Item -ItemType Directory -Path $installedAssets -Force | Out-Null
+        foreach ($asset in Get-ChildItem -LiteralPath $previousAssets -File) {
+            $assetTarget = Join-Path $installedAssets $asset.Name
+            if (-not (Test-Path -LiteralPath $assetTarget)) {
+                Copy-Item -LiteralPath $asset.FullName -Destination $assetTarget
+            }
+        }
+    }
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) { throw 'Production configuration changed unexpectedly.' }
     if ((Get-FileHash -LiteralPath (Join-Path $resolvedInstall 'Ground43.Api.dll') -Algorithm SHA256).Hash -ne $sourceAssemblyHash) { throw 'Installed server assembly does not match the update package.' }
     if (-not (Test-Path -LiteralPath $databasePath)) { throw 'Production database disappeared.' }
