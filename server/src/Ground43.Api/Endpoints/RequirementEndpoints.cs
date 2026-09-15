@@ -19,6 +19,8 @@ public static class RequirementEndpoints
         group.MapGet("/{id}", GetAsync);
         group.MapPost("/", CreateAsync);
         group.MapPost("/batch", BatchCreateAsync);
+        group.MapPost("/family", CreateFamilyAsync);
+        group.MapPost("/{id}/children", LinkChildrenAsync);
         group.MapPatch("/{id}", UpdateAsync);
         group.MapDelete("/{id}", DeleteAsync).RequireAuthorization("Admin");
         group.MapPost("/{id}/comments", AddCommentAsync);
@@ -92,6 +94,93 @@ public static class RequirementEndpoints
         return entity is null ? Results.NotFound() : Results.Ok(entity.ToDto());
     }
 
+    private static async Task<IResult> LinkChildrenAsync(string id, LinkChildrenRequest request, HttpContext context, AppDbContext db, CancellationToken ct)
+    {
+        if (request.ChildIds is null || request.ChildIds.Length is < 1 or > 100) return Results.BadRequest(new { message = "请选择 1～100 个子需求" });
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        var parent = await db.Requirements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (parent is null || parent.ParentId != null) return Results.BadRequest(new { message = "只能为顶层需求绑定子需求" });
+        var ids = request.ChildIds.Distinct().ToArray();
+        var children = await db.Requirements.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        if (ids.Contains(id) || children.Count != ids.Length || children.Any(x => x.ParentId != null && x.ParentId != id)
+            || await db.Requirements.AnyAsync(x => x.ParentId != null && ids.Contains(x.ParentId), ct))
+            return Results.Conflict(new { message = "选中的需求已有父需求、包含子需求或不存在，本次未绑定" });
+        if (parent.StatusId is "completed" or "closed" && children.Any(x => x.StatusId is not ("completed" or "closed")))
+            return Results.BadRequest(new { message = "已完成的父需求不能绑定未完成子需求" });
+        foreach (var child in children.Where(x => x.ParentId != id))
+        {
+            var now = DateTimeOffset.UtcNow;
+            var changed = await db.Requirements.Where(x => x.Id == child.Id && x.ParentId == null && x.Version == child.Version)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.ParentId, id).SetProperty(x => x.Version, x => x.Version + 1).SetProperty(x => x.UpdatedAt, now), ct);
+            if (changed != 1) return Results.Conflict(new { message = "子需求已被其他人修改，本次未绑定，请重试" });
+            db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = child.Id, ActorId = context.User.UserId(), Action = "需求更新", Detail = $"绑定父需求：{id}", CreatedAt = now });
+        }
+        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> CreateFamilyAsync(CreateFamilyRequest request, HttpContext context, AppDbContext db, RequirementCodeService codes, ReviewNotificationService notifications, AssignmentNotificationService assignments, CancellationToken ct)
+    {
+        if (request.RequestId == Guid.Empty || request.Parent is null || request.Children is null || request.ExistingChildIds is null
+            || request.Children.Length + request.ExistingChildIds.Length > 100)
+            return Results.BadRequest(new { message = "最多支持 100 个子需求，需要有效提交标识" });
+        var hasChildren = request.Children.Length + request.ExistingChildIds.Length > 0;
+        if (hasChildren && request.Parent.ParentId is not null)
+            return Results.BadRequest(new { message = "创建子需求时不能同时指定父需求，不支持嵌套创建孙需求" });
+        var hash = "family:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(request))));
+        var userId = context.User.UserId();
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        var previous = await db.BatchCreations.FindAsync([userId, request.RequestId], ct);
+        if (previous is not null)
+        {
+            if (previous.PayloadHash != hash) return Results.Conflict(new { message = "提交标识已用于其他内容，请检查上次创建结果" });
+            var savedIds = System.Text.Json.JsonSerializer.Deserialize<string[]>(previous.ResultJson)!;
+            return Results.Ok(new { parentId = savedIds[0], requirements = (await DetailQuery(db).AsNoTracking().Where(x => savedIds.Contains(x.Id)).ToListAsync(ct)).Select(Mapping.ToDto) });
+        }
+        var existingIds = request.ExistingChildIds.Distinct().ToArray();
+        var existing = await db.Requirements.Where(x => existingIds.Contains(x.Id)).ToListAsync(ct);
+        if (existing.Count != existingIds.Length || existing.Any(x => x.ParentId != null)
+            || await db.Requirements.AnyAsync(x => x.ParentId != null && existingIds.Contains(x.ParentId), ct))
+            return Results.Conflict(new { message = "选中的需求不存在、已有父需求或包含子需求，请重新选择。本次未创建任何需求。" });
+        var all = new[] { request.Parent }.Concat(request.Children).ToArray();
+        for (var i = 0; i < all.Length; i++)
+        {
+            var item = all[i];
+            if (item is null || string.IsNullOrWhiteSpace(item.Title) || item.Title.Length > 500 || string.IsNullOrWhiteSpace(item.Description)
+                || (i > 0 && item.ParentId != null) || !await db.RequirementTypes.AnyAsync(x => x.Id == item.RequirementTypeId && x.Enabled, ct)
+                || (item.ReviewerId != null && !await db.Users.AnyAsync(x => x.Id == item.ReviewerId && x.IsActive, ct)))
+                return Results.BadRequest(new { message = i == 0 ? "请检查父需求标题、描述、类型和验收人" : $"第 {i} 个子需求：请检查标题、描述、类型和验收人" });
+        }
+        if (hasChildren && (request.Parent.StatusId is "completed" or "closed")
+            && (request.Children.Any(x => x.StatusId is not ("completed" or "closed")) || existing.Any(x => x.StatusId is not ("completed" or "closed"))))
+            return Results.BadRequest(new { message = "仍有未完成子需求，父需求不能直接设置为验收完成或已关闭" });
+        var receipt = new BatchCreationEntity { UserId = userId, RequestId = request.RequestId, PayloadHash = hash };
+        db.BatchCreations.Add(receipt);
+        await db.SaveChangesAsync(ct);
+        var ids = new List<string>();
+        for (var i = 0; i < all.Length; i++)
+        {
+            var item = i == 0 ? all[i] : all[i] with { ParentId = ids[0] };
+            var result = await CreateAsync(item, context, db, codes, notifications, assignments, ct, false);
+            if (result is not IStatusCodeHttpResult status || status.StatusCode != 201)
+                return Results.BadRequest(new { message = i == 0 ? "父需求校验失败，本次未创建" : $"第 {i} 个子需求校验失败，本次未创建", detail = (result as IValueHttpResult)?.Value });
+            ids.Add(((RequirementDto)((IValueHttpResult)result).Value!).Id);
+        }
+        foreach (var child in existing)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var claimed = await db.Requirements.Where(x => x.Id == child.Id && x.ParentId == null && x.Version == child.Version)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.ParentId, ids[0]).SetProperty(x => x.Version, x => x.Version + 1).SetProperty(x => x.UpdatedAt, now), ct);
+            if (claimed != 1) return Results.Conflict(new { message = "子需求已被其他人修改，请重新选择。本次未创建。" });
+            db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = child.Id, ActorId = userId, Action = "需求更新", Detail = $"绑定父需求：{ids[0]}", CreatedAt = now });
+            ids.Add(child.Id);
+        }
+        receipt.ResultJson = System.Text.Json.JsonSerializer.Serialize(ids);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.Ok(new { parentId = ids[0], requirements = (await DetailQuery(db).AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct)).Select(Mapping.ToDto) });
+    }
+
     private static async Task<IResult> BatchCreateAsync(BatchCreateRequest request, HttpContext context, AppDbContext db, RequirementCodeService codes, ReviewNotificationService notifications, AssignmentNotificationService assignments, CancellationToken ct)
     {
         if (request.RequestId == Guid.Empty || request.Items is null || request.Items.Length is < 1 or > 100)
@@ -125,24 +214,24 @@ public static class RequirementEndpoints
         return Results.Ok(new { ids });
     }
 
-    private static async Task<IResult> CreateAsync(CreateRequirementRequest request, HttpContext context, AppDbContext db, RequirementCodeService codes, ReviewNotificationService notifications, AssignmentNotificationService assignments, CancellationToken ct)
+    private static async Task<IResult> CreateAsync(CreateRequirementRequest request, HttpContext context, AppDbContext db, RequirementCodeService codes, ReviewNotificationService notifications, AssignmentNotificationService assignments, CancellationToken ct, bool useDefaults = true)
     {
         var defaults=await db.RequirementDefaults.AsNoTracking().SingleAsync(x=>x.Id==1,ct);
         var module=string.IsNullOrWhiteSpace(request.Module)?defaults.Module??"UI":request.Module;
         var priority=string.IsNullOrWhiteSpace(request.Priority)?defaults.Priority:request.Priority;
         var statusId=string.IsNullOrWhiteSpace(request.StatusId)?defaults.StatusId??"todo":request.StatusId;
-        var assigneeId=request.AssigneeId??defaults.AssigneeId;var reviewerId=request.ReviewerId??defaults.ReviewerId;var typeId=request.RequirementTypeId??defaults.RequirementTypeId;
+        var assigneeId=request.AssigneeId??(useDefaults?defaults.AssigneeId:null);var reviewerId=request.ReviewerId??(useDefaults?defaults.ReviewerId:null);var typeId=request.RequirementTypeId??defaults.RequirementTypeId;
         var assigneeIds = request.AssigneeIds ?? (assigneeId is null ? [] : new[] { assigneeId });
         assigneeIds = assigneeIds.Distinct().ToArray();
         if (assigneeIds.Any(string.IsNullOrWhiteSpace) || await db.Users.CountAsync(x => assigneeIds.Contains(x.Id) && x.IsActive, ct) != assigneeIds.Length)
             return Results.BadRequest(new { message = "处理人不存在或已停用" });
         assigneeId = assigneeIds.FirstOrDefault();
-        var iterationId=request.IterationId;if(iterationId is null&&defaults.IterationMode=="current")iterationId=await db.Iterations.Where(x=>x.State=="active").OrderByDescending(x=>x.StartDate).Select(x=>x.Id).FirstOrDefaultAsync(ct);else if(iterationId is null&&defaults.IterationMode=="specific")iterationId=defaults.IterationId;
+        var iterationId=request.IterationId;if(useDefaults&&iterationId is null&&defaults.IterationMode=="current")iterationId=await db.Iterations.Where(x=>x.State=="active").OrderByDescending(x=>x.StartDate).Select(x=>x.Id).FirstOrDefaultAsync(ct);else if(useDefaults&&iterationId is null&&defaults.IterationMode=="specific")iterationId=defaults.IterationId;
         var validation = await ValidateAsync(null, module, priority, statusId, assigneeId, iterationId, request.ParentId, reviewerId, typeId, context, db, ct);
         if (validation is not null) return validation;
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Description)) return Results.BadRequest(new { message = "需求标题和描述不能为空" });
         if (!TryDate(request.DueDate, out var dueDate)) return Results.BadRequest(new { message = "期望完成日期格式无效" });
-        if(dueDate is null&&defaults.DueDateOffsetDays.HasValue)dueDate=DateOnly.FromDateTime(DateTime.Today).AddDays(defaults.DueDateOffsetDays.Value);
+        if(useDefaults&&dueDate is null&&defaults.DueDateOffsetDays.HasValue)dueDate=DateOnly.FromDateTime(DateTime.Today).AddDays(defaults.DueDateOffsetDays.Value);
         var now = DateTimeOffset.UtcNow; var id = await codes.NextAsync(ct); var userId = context.User.UserId();
         var entity = new RequirementEntity
         {

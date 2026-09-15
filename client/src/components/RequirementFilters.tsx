@@ -1,5 +1,7 @@
 import { assigneeIds } from '../assignees'
-import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useState } from 'react'
+import { useDropdown } from './useDropdown'
 import { useAppStore } from '../store'
 import { priorityLabel } from '../utils'
 
@@ -7,23 +9,17 @@ export const selectedValues = (value: string) => value.split(',').filter(Boolean
 export const filterMatches = (filter: string, value: string | null | undefined) => !filter || selectedValues(filter).includes(value ?? '')
 export const isMyTask = (item: { assigneeIds?: string[]; assigneeId: string | null; reviewerId?: string | null; statusId: string }, userId: string) => assigneeIds(item).includes(userId) || (item.reviewerId === userId && item.statusId === 'review')
 
-function MultiFilter({ label, value, options, onChange }: { label: string; value: string; options: { id: string; name: string }[]; onChange: (value: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
+function MultiFilter({ label, value, options, onChange }: { label: string; value: string; options: { id: string; name: string; account?: string }[]; onChange: (value: string) => void }) {
+  const { open, setOpen, root, menu, position } = useDropdown(260)
+  const [query, setQuery] = useState('')
   const selected = selectedValues(value)
-  useEffect(() => {
-    if (!open) return
-    const outside = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false) }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
-    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape)
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) }
-  }, [open])
   return <div ref={root} className="multi-filter">
     <button className="button button--ghost button--compact" type="button" aria-expanded={open} aria-label={`${label}筛选`} onClick={() => setOpen(!open)}>{selected.length ? `${label} (${selected.length})` : `全部${label}`} ▾</button>
-    {open && <div className="multi-filter__menu" role="group" aria-label={`${label}选项`}>
+    {open && createPortal(<div ref={menu} style={{ position: 'fixed', ...position, zIndex: 350 }} className="multi-filter__menu dropdown-menu" role="group" aria-label={`${label}选项`}>
       <div className="multi-filter__actions"><button type="button" disabled={!options.length || options.every(option => selected.includes(option.id))} onClick={() => onChange(options.map(option => option.id).join(','))}>全选</button><button type="button" onClick={() => onChange('')}>清空（全部）</button></div>
-      {options.map(option => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} onChange={event => onChange(event.target.checked ? [...selected, option.id].join(',') : selected.filter(id => id !== option.id).join(','))} />{option.name}</label>)}
-    </div>}
+      {label === '处理人' && <input className="member-search" aria-label="搜索处理人筛选" placeholder="搜索姓名或账号" value={query} onChange={e => setQuery(e.target.value)} />}
+      {options.filter(option => label !== '处理人' || `${option.name} ${option.account ?? ''}`.toLowerCase().includes(query.toLowerCase())).map(option => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} onChange={event => onChange(event.target.checked ? [...selected, option.id].join(',') : selected.filter(id => id !== option.id).join(','))} />{option.name}</label>)}
+    </div>, document.body)}
   </div>
 }
 

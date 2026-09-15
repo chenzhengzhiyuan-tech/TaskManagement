@@ -1,3 +1,4 @@
+import { uuid } from '../uuid'
 import { AssigneePicker } from './AssigneePicker'
 import { assigneeIds, assigneeNames } from '../assignees'
 import { AttachmentThumbnail } from './AttachmentThumbnail'
@@ -97,7 +98,6 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
 
   const activeRequirement = requirement
   const activeId = requirement.id
-  const status = statuses.find((item) => item.id === requirement.statusId)
   const assignee = getUser(users, requirement.assigneeId)
   const iteration = iterations.find((item) => item.id === requirement.iterationId)
 
@@ -123,7 +123,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
 
   async function handleAttachment(file: File | undefined) {
     if (!file) return
-    const id = crypto.randomUUID()
+    const id = uuid()
     setUploads(previous => [...previous, { id, name: file.name, progress: 0 }])
     const progress = (value: number) => setUploads(previous => previous.map(item => item.id === id ? { ...item, progress: value } : item))
     try {
@@ -211,15 +211,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
           </div>
 
           <div className="drawer-toolbar">
-            <select value={requirement.statusId} onChange={(event) => void changeStatus(event.target.value)} aria-label="需求状态">
-              {statuses.map((item) => {
-                const blockedByChildren = Boolean(parentFinalStatusBlockReason(activeRequirement, item.id, requirements))
-                const blockedByRole = currentUser.role === 'developer' && item.protected
-                return <option key={item.id} value={item.id} disabled={blockedByRole || blockedByChildren}>
-                  {item.name}{blockedByRole ? '（仅管理员）' : blockedByChildren ? '（需先完成全部子任务）' : ''}
-                </option>
-              })}
-            </select>
+
             <button className="button button--ghost button--compact" type="button" onClick={() => setTab('comments')}>
               <MessageSquare size={15} />{requirement.comments.length}
             </button>
@@ -251,16 +243,24 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
                 <section className="detail-section">
                   <h3>基础信息</h3>
                   <div className="detail-grid">
-                    <label><span>状态</span><div className="status-chip" style={{ '--status-color': status?.color } as React.CSSProperties}><i />{status?.name}</div></label>
+                    <label><span>状态</span><select value={requirement.statusId} onChange={(event) => void changeStatus(event.target.value)} aria-label="需求状态">
+              {statuses.map((item) => {
+                const blockedByChildren = Boolean(parentFinalStatusBlockReason(activeRequirement, item.id, requirements))
+                const blockedByRole = currentUser.role === 'developer' && item.protected
+                return <option key={item.id} value={item.id} disabled={blockedByRole || blockedByChildren}>
+                  {item.name}{blockedByRole ? '（仅管理员）' : blockedByChildren ? '（需先完成全部子任务）' : ''}
+                </option>
+              })}
+            </select></label>
                     <label><span>需求单类型</span><select value={requirement.requirementTypeId ?? ''} onChange={(event) => void updateRequirement(requirement.id, { requirementTypeId: event.target.value || null }, '更新了需求单类型')}><option value="">未设置</option>{requirementTypes.filter((item)=>item.enabled).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                     <div className="detail-assignees"><span>处理人</span><AssigneePicker users={users} value={assigneeIds(requirement)} onChange={ids => updateRequirement(requirement.id, { assigneeIds: ids, assigneeId: ids[0] ?? null }, '更新了处理人')} /></div>
-                    <label><span>验收人</span><select value={requirement.reviewerId ?? ''} onChange={(event) => void updateRequirement(requirement.id, { reviewerId: event.target.value || null }, '更新了验收人')}><option value="">未指定</option>{activeUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>
+                    <div className="detail-assignees"><span>验收人</span><AssigneePicker label="验收人" single users={activeUsers} value={requirement.reviewerId ? [requirement.reviewerId] : []} onChange={ids => updateRequirement(requirement.id, { reviewerId: ids[0] ?? null }, '更新了验收人')}/></div>
                     <label><span>优先级</span><select value={requirement.priority} onChange={(event) => void updateRequirement(requirement.id, { priority: event.target.value as Priority }, '更新了优先级')}>{(Object.keys(priorityLabel) as Priority[]).map((item) => <option key={item} value={item}>{priorityLabel[item]}</option>)}</select></label>
                     <label><span>模块</span><select value={requirement.module} onChange={(event) => void updateRequirement(requirement.id, { module: event.target.value }, '更新了归属模块')}>{modules.map((module) => <option key={module}>{module}</option>)}</select></label>
                     <label><span>所属迭代</span><select value={requirement.iterationId ?? ''} onChange={(event) => void updateRequirement(requirement.id, { iterationId: event.target.value || null }, '更新了所属迭代')}><option value="">未规划</option>{iterations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                     <label><span>期望完成</span><input type="date" value={requirement.dueDate ?? ''} onChange={(event) => void updateRequirement(requirement.id, { dueDate: event.target.value || null }, '更新了期望完成时间')} /></label>
                   </div>
-                  <div className="detail-parent-field"><span>父需求</span><ParentRequirementPicker requirements={requirements} value={requirement.parentId} excludeId={requirement.id} disabled={children.length > 0} onChange={(parentId) => updateRequirement(requirement.id, { parentId }, parentId ? '更新了父需求' : '移除了父需求')} />{children.length > 0 && <small>当前需求包含子需求，不能再设置为其他需求的子需求。</small>}</div>
+
                 </section>
 
                 <section className="detail-section">
@@ -273,7 +273,8 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
                   </> : <div className="description-content">{requirement.description || '暂无需求描述'}</div>}
                 </section>
 
-                <section className="detail-section">
+                <section className="detail-section detail-relations">
+                  <div className="detail-parent-field"><h3>父需求</h3><ParentRequirementPicker requirements={requirements} value={requirement.parentId} excludeId={requirement.id} disabled={children.length > 0} onChange={(parentId) => updateRequirement(requirement.id, { parentId }, parentId ? '更新了父需求' : '移除了父需求')} />{children.length > 0 && <small>当前需求包含子需求，不能再设置为其他需求的子需求。</small>}</div>
                   <div className="section-heading"><h3>子需求</h3><span>{children.length} 条</span></div>
                   {children.length ? (
                     <div className="child-list child-list--managed">
@@ -282,7 +283,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
                       ))}
                     </div>
                   ) : <div className="empty-inline">暂无子需求</div>}
-                  {!requirement.parentId ? <ChildRequirementPicker requirements={requirements} parentId={requirement.id} onLink={(childId) => void updateRequirement(childId, { parentId: requirement.id }, `绑定为 ${requirement.id} 的子需求`)} /> : <div className="relation-limit-note">当前需求已经是子需求，不能继续绑定下一级子需求。</div>}
+                  {!requirement.parentId ? <ChildRequirementPicker parentId={requirement.id} /> : <div className="relation-limit-note">当前需求已经是子需求，不能继续绑定下一级子需求。</div>}
                 </section>
 
                 <section className="detail-section">

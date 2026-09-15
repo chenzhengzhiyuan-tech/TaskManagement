@@ -131,3 +131,5 @@ export interface AppData {
 }
 
 
+
+export interface CreateFamilyOptions { requestId: string; children: CreateRequirementInput[]; existingChildIds: string[] }

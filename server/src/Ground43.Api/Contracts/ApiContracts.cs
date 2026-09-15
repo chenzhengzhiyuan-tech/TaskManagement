@@ -67,3 +67,7 @@ public sealed record RequirementImportRowDto(
 public sealed record RequirementImportResultDto(
     bool Preview, int TotalRows, int ValidRows, int InvalidRows, int ImportedRows,
     IReadOnlyList<RequirementImportRowDto> Rows);
+
+public sealed record CreateFamilyRequest(Guid RequestId, CreateRequirementRequest Parent, CreateRequirementRequest[] Children, string[] ExistingChildIds);
+
+public sealed record LinkChildrenRequest(string[] ChildIds);

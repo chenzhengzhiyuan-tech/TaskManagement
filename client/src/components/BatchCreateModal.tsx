@@ -1,3 +1,4 @@
+import { uuid } from '../uuid'
 import { AssigneePicker } from './AssigneePicker'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
@@ -11,8 +12,8 @@ interface Draft { rows: BatchRow[]; requestId: string; pending: boolean; ids?: s
 export function BatchCreateModal({ onClose, onOpen }: { onClose: () => void; onOpen: (id: string) => void }) {
   const { currentUser, users, modules, statuses, iterations, requirementTypes, requirementDefaults: defaults, refresh, mode } = useAppStore()
   const storageKey = `g43-batch-draft:${currentUser.id}`
-  function emptyRow(): BatchRow { return { key: crypto.randomUUID(), title: '', description: defaults.descriptionTemplate ?? '', assignee: users.find(x => x.id === defaults.assigneeId)?.account ?? '', reviewer: users.find(x => x.id === defaults.reviewerId)?.account ?? '', priority: priorityLabel[defaults.priority ?? 'medium'], module: defaults.module ?? modules[0] ?? '', type: requirementTypes.find(x => x.id === defaults.requirementTypeId)?.name ?? requirementTypes.find(x => x.enabled)?.name ?? '', due: defaults.dueDateOffsetDays == null ? '' : chinaDateKey(new Date(Date.now() + defaults.dueDateOffsetDays * 86400000)), iteration: iterations.find(x => x.id === (defaults.iterationMode === 'specific' ? defaults.iterationId : defaults.iterationMode === 'current' ? iterations.find(x => x.state === 'active')?.id : null))?.name ?? '', status: statuses.find(x => x.id === defaults.statusId)?.name ?? '未开始' } }
-  const [draft, setDraft] = useState<Draft>(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null'); if (saved && Array.isArray(saved.rows) && saved.rows.length <= 100 && typeof saved.requestId === 'string') return saved } catch { /* Start a fresh draft. */ } return { rows: [emptyRow()], requestId: crypto.randomUUID(), pending: false } })
+  function emptyRow(): BatchRow { return { key: uuid(), title: '', description: defaults.descriptionTemplate ?? '', assignee: users.find(x => x.id === defaults.assigneeId)?.account ?? '', reviewer: users.find(x => x.id === defaults.reviewerId)?.account ?? '', priority: priorityLabel[defaults.priority ?? 'medium'], module: defaults.module ?? modules[0] ?? '', type: requirementTypes.find(x => x.id === defaults.requirementTypeId)?.name ?? requirementTypes.find(x => x.enabled)?.name ?? '', due: defaults.dueDateOffsetDays == null ? '' : chinaDateKey(new Date(Date.now() + defaults.dueDateOffsetDays * 86400000)), iteration: iterations.find(x => x.id === (defaults.iterationMode === 'specific' ? defaults.iterationId : defaults.iterationMode === 'current' ? iterations.find(x => x.state === 'active')?.id : null))?.name ?? '', status: statuses.find(x => x.id === defaults.statusId)?.name ?? '未开始' } }
+  const [draft, setDraft] = useState<Draft>(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) ?? 'null'); if (saved && Array.isArray(saved.rows) && saved.rows.length <= 100 && typeof saved.requestId === 'string') return saved } catch { /* Start a fresh draft. */ } return { rows: [emptyRow()], requestId: uuid(), pending: false } })
   const [selected, setSelected] = useState<string[]>([])
   const [paste, setPaste] = useState('')
   const [cells, setCells] = useState<string[][]>([])
@@ -44,7 +45,7 @@ export function BatchCreateModal({ onClose, onOpen }: { onClose: () => void; onO
   const errors = draft.rows.map(rowErrors)
   const invalid = errors.filter(x => Object.keys(x).length).length
   const duplicates = draft.rows.filter((row, i, all) => row.title.trim() && all.findIndex(x => x.title.trim() === row.title.trim()) !== i).length
-  function edit(rows: BatchRow[]) { setConfirm(false); setError(''); setDraft({ rows, requestId: crypto.randomUUID(), pending: false }) }
+  function edit(rows: BatchRow[]) { setConfirm(false); setError(''); setDraft({ rows, requestId: uuid(), pending: false }) }
   function inspectPaste() {
     try { if (paste.length > 1_000_000) throw new Error('粘贴内容过大'); const table = parseClipboard(paste); if (!table.length || table.length > 101) throw new Error('每批最多100行'); const guessed = table[0].map(text => columns.find(([, label]) => label === text.trim())?.[0] ?? (text.trim() === '负责人' ? 'assignee' : text.trim() === '需求描述' ? 'description' : text.trim() === '需求标题' ? 'title' : '')); const header = guessed.includes('title'); setCells(table); setHasHeader(header); setMapping(Array.from({ length: Math.max(...table.map(row => row.length)) }, (_, i) => header ? guessed[i] ?? '' : columns[i]?.[0] ?? '')); setError('') } catch (err) { setError(String(err instanceof Error ? err.message : err)) }
   }
@@ -70,7 +71,7 @@ export function BatchCreateModal({ onClose, onOpen }: { onClose: () => void; onO
       try { await refresh() } catch { /* Results remain available even if refreshing fails. */ }
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交失败，请重试')
-      if (err instanceof ApiError && err.status === 400) setDraft({ ...draft, pending: false, requestId: crypto.randomUUID() })
+      if (err instanceof ApiError && err.status === 400) setDraft({ ...draft, pending: false, requestId: uuid() })
     } finally { gate.current = false; setBusy(false) }
   }
   const frozen = busy || draft.pending

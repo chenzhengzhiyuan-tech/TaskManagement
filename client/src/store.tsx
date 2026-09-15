@@ -1,3 +1,5 @@
+import { uuid } from './uuid'
+import type { CreateFamilyOptions } from './types'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsWithChildren } from 'react'
 import { ApiError, apiBlob, apiRequest, getApiToken, setApiToken } from './api'
@@ -45,7 +47,7 @@ interface AppStoreValue extends AppData {
   login: (account: string, password: string) => Promise<OperationResult>
   logout: () => Promise<void>
   refresh: () => Promise<void>
-  createRequirement: (input: CreateRequirementInput) => Promise<string>
+  createRequirement: (input: CreateRequirementInput, family?: CreateFamilyOptions) => Promise<string>
   updateRequirement: (id: string, patch: Partial<Requirement>, summary?: string) => Promise<boolean>
   moveRequirementStatus: (id: string, statusId: string) => Promise<OperationResult>
   deleteRequirement: (id: string) => Promise<boolean>
@@ -233,14 +235,29 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     setAuthenticated(false); setData(cloneInitialData()); setModuleIds({})
   }, [])
 
-  const createRequirement = useCallback(async (input: CreateRequirementInput) => {
+  const createRequirement = useCallback(async (input: CreateRequirementInput, family?: CreateFamilyOptions) => {
+    if (family && API_MODE) {
+      const result = await apiRequest<{parentId: string; requirements: Requirement[]}>('/requirements/family', { method: 'POST', body: JSON.stringify({ ...family, parent: input }) })
+      setData(previous => ({ ...previous, requirements: [...result.requirements, ...previous.requirements.filter(item => !result.requirements.some(created => created.id === item.id))] }))
+      return result.parentId
+    }
+    if (family && (family.children.length || family.existingChildIds.length)) {
+      const selected = data.requirements.filter(x => family.existingChildIds.includes(x.id))
+      if (selected.length !== family.existingChildIds.length || selected.some(x => x.parentId || data.requirements.some(child => child.parentId === x.id))) throw new Error('选中的需求已有父需求或包含子需求，请重新选择')
+      const maxId = Math.max(0, ...data.requirements.map(x => Number(x.id.replace('REQ-', '')) || 0))
+      const timestamp = nowIso()
+      const parentId = `REQ-${String(maxId + 1).padStart(4, '0')}`
+      const created: Requirement[] = [input, ...family.children].map((item, i) => ({...item, id: `REQ-${String(maxId + i + 1).padStart(4, '0')}`, parentId: i ? parentId : input.parentId, creatorId: currentUser.id, createdAt: timestamp, updatedAt: timestamp, version: 1, comments: [], attachments: [], history: [], customValues: {} }))
+      setData(previous => ({...previous, requirements: [...created, ...previous.requirements.map(item => family.existingChildIds.includes(item.id) ? {...item, parentId, version: (item.version ?? 1) + 1} : item)]}))
+      return parentId
+    }
     if (API_MODE) {
       const created = await apiRequest<Requirement>('/requirements', { method: 'POST', body: JSON.stringify(input) })
       setData((previous) => ({ ...previous, requirements: [created, ...previous.requirements] })); return created.id
     }
     const maxId = data.requirements.reduce((max, item) => Math.max(max, Number(item.id.replace('REQ-', '')) || 0), 0)
     const id = `REQ-${String(maxId + 1).padStart(4, '0')}`; const timestamp = nowIso()
-    const requirement: Requirement = { ...input, reviewerId: input.reviewerId ?? data.requirementDefaults.reviewerId, requirementTypeId: input.requirementTypeId ?? data.requirementDefaults.requirementTypeId, id, creatorId: currentUser.id, createdAt: timestamp, updatedAt: timestamp, comments: [], attachments: [], customValues: input.customValues ?? {}, version: 1, history: [{ id: crypto.randomUUID(), actorId: currentUser.id, action: '创建需求', detail: `创建了 ${id}`, createdAt: timestamp }] }
+    const requirement: Requirement = { ...input, reviewerId: input.reviewerId ?? data.requirementDefaults.reviewerId, requirementTypeId: input.requirementTypeId ?? data.requirementDefaults.requirementTypeId, id, creatorId: currentUser.id, createdAt: timestamp, updatedAt: timestamp, comments: [], attachments: [], customValues: input.customValues ?? {}, version: 1, history: [{ id: uuid(), actorId: currentUser.id, action: '创建需求', detail: `创建了 ${id}`, createdAt: timestamp }] }
     setData((previous) => ({ ...previous, requirements: [requirement, ...previous.requirements] })); return id
   }, [currentUser.id, data.requirements, data.requirementDefaults.reviewerId, data.requirementDefaults.requirementTypeId])
 
@@ -270,7 +287,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       } catch (error) { const reason=handleApiError(error); setLastOperationError(reason); if (error instanceof ApiError && error.status === 409) await refresh(); return false }
     }
     const timestamp = nowIso()
-    setData((previous) => ({ ...previous, requirements: previous.requirements.map((requirement) => requirement.id === id ? { ...requirement, ...patch, version: (requirement.version ?? 1) + 1, updatedAt: timestamp, history: [{ id: crypto.randomUUID(), actorId: currentUser.id, action: '需求更新', detail: summary, createdAt: timestamp }, ...requirement.history] } : requirement) })); return true
+    setData((previous) => ({ ...previous, requirements: previous.requirements.map((requirement) => requirement.id === id ? { ...requirement, ...patch, version: (requirement.version ?? 1) + 1, updatedAt: timestamp, history: [{ id: uuid(), actorId: currentUser.id, action: '需求更新', detail: summary, createdAt: timestamp }, ...requirement.history] } : requirement) })); return true
   }, [currentUser.id, currentUser.role, data.requirements, data.statuses, handleApiError, refresh])
 
   const moveRequirementStatus = useCallback(async (id: string, statusId: string): Promise<OperationResult> => {
@@ -316,11 +333,11 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     }
     if (options?.mentions.some(mention => !data.users.some(user => user.id === mention.userId && user.active !== false && user.wecomBound))) throw new Error('只能 @ 已启用且已绑定企微的成员')
     const timestamp = nowIso()
-    const comment: Comment = { id: options?.requestId ?? crypto.randomUUID(), authorId: currentUser.id, content, createdAt: timestamp,
+    const comment: Comment = { id: options?.requestId ?? uuid(), authorId: currentUser.id, content, createdAt: timestamp,
       mentions: options?.mentions ?? [], attachments: (options?.attachmentIds ?? []).map(id => commentImages.current.get(id)).filter((image): image is Attachment => Boolean(image)) }
     setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id !== id || item.comments.some(entry => entry.id === comment.id) ? item : {
       ...item, version: (item.version ?? 1) + 1, updatedAt: timestamp, comments: [...item.comments, comment],
-      history: [{ id: crypto.randomUUID(), actorId: currentUser.id, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: timestamp }, ...item.history],
+      history: [{ id: uuid(), actorId: currentUser.id, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: timestamp }, ...item.history],
     }) }))
   }, [currentUser.id, data.users])
 
@@ -339,7 +356,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       return completed.attachment
     }
     for (const progress of [8, 30, 52, 74, 96, 100]) { onProgress?.(progress); await wait(90) }
-    const attachment: Attachment = { id: crypto.randomUUID(), name: file.name, size: file.size, type: file.type, uploadedBy: currentUser.id, createdAt: nowIso() }
+    const attachment: Attachment = { id: uuid(), name: file.name, size: file.size, type: file.type, uploadedBy: currentUser.id, createdAt: nowIso() }
     await saveAttachmentBlob(attachment.id, file)
     if (forComment) { commentImages.current.set(attachment.id, attachment); return attachment }
     setData((previous) => ({ ...previous, requirements: previous.requirements.map((item) => item.id === id ? { ...item, attachments: [...item.attachments, attachment], updatedAt: nowIso(), version: (item.version ?? 1) + 1 } : item) }))
@@ -363,7 +380,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
   }, [])
 
   const createUser = useCallback(async (input: { account: string; name: string; role: User['role']; password: string; color?: string; weComEmail?: string | null }): Promise<OperationResult> => {
-    try { const user: User = API_MODE ? await apiRequest('/users', { method: 'POST', body: JSON.stringify(input) }) : { id: `u-${crypto.randomUUID()}`, account: input.account, name: input.name, role: input.role, password: undefined, initials: input.name.slice(0,1), color: input.color ?? '#0a84ff', wecomBound: Boolean(input.weComEmail), active: true } as User; setData((previous) => ({ ...previous, users: [...previous.users, user] })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } }
+    try { const user: User = API_MODE ? await apiRequest('/users', { method: 'POST', body: JSON.stringify(input) }) : { id: `u-${uuid()}`, account: input.account, name: input.name, role: input.role, password: undefined, initials: input.name.slice(0,1), color: input.color ?? '#0a84ff', wecomBound: Boolean(input.weComEmail), active: true } as User; setData((previous) => ({ ...previous, users: [...previous.users, user] })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } }
   }, [handleApiError])
 
   const validateWeComEmail = useCallback(async (email: string): Promise<{ ok: boolean; reason?: string; profile?: WeComUserProfile }> => {
@@ -466,7 +483,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
   const addStatus = useCallback(async (name: string, color: string): Promise<OperationResult> => {
     const trimmed = name.trim(); if (!trimmed) return { ok: false, reason: '请输入状态名称' }
     try {
-      const status: StatusDefinition = API_MODE ? await apiRequest('/statuses', { method: 'POST', body: JSON.stringify({ name: trimmed, color }) }) : { id: `status-${crypto.randomUUID()}`, name: trimmed, color, terminal: false }
+      const status: StatusDefinition = API_MODE ? await apiRequest('/statuses', { method: 'POST', body: JSON.stringify({ name: trimmed, color }) }) : { id: `status-${uuid()}`, name: trimmed, color, terminal: false }
       setData((previous) => ({ ...previous, statuses: [...previous.statuses, status] })); return { ok: true }
     } catch (error) { return { ok: false, reason: handleApiError(error) } }
   }, [handleApiError])
@@ -485,7 +502,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const addCustomField = useCallback(async (field: Omit<CustomField, 'id' | 'enabled'>): Promise<OperationResult> => {
     try {
-      const created: CustomField = API_MODE ? await apiRequest('/custom-fields', { method: 'POST', body: JSON.stringify(field) }) : { ...field, id: `cf-${crypto.randomUUID()}`, enabled: true }
+      const created: CustomField = API_MODE ? await apiRequest('/custom-fields', { method: 'POST', body: JSON.stringify(field) }) : { ...field, id: `cf-${uuid()}`, enabled: true }
       setData((previous) => ({ ...previous, customFields: [...previous.customFields, created] })); return { ok: true }
     } catch (error) { return { ok: false, reason: handleApiError(error) } }
   }, [handleApiError])
@@ -496,7 +513,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
     setData((previous) => ({ ...previous, customFields: previous.customFields.map((item) => item.id === id ? { ...item, enabled: !item.enabled } : item) }))
   }, [data.customFields])
 
-  const addRequirementType = useCallback(async (name: string): Promise<OperationResult> => { try { const created: RequirementType = API_MODE ? await apiRequest('/requirement-types', { method: 'POST', body: JSON.stringify({ name }) }) : { id: crypto.randomUUID(), name, color: nextRequirementTypeColor(data.requirementTypes), sortOrder: data.requirementTypes.length + 1, enabled: true }; setData((previous) => ({ ...previous, requirementTypes: [...previous.requirementTypes, created] })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } } }, [data.requirementTypes, handleApiError])
+  const addRequirementType = useCallback(async (name: string): Promise<OperationResult> => { try { const created: RequirementType = API_MODE ? await apiRequest('/requirement-types', { method: 'POST', body: JSON.stringify({ name }) }) : { id: uuid(), name, color: nextRequirementTypeColor(data.requirementTypes), sortOrder: data.requirementTypes.length + 1, enabled: true }; setData((previous) => ({ ...previous, requirementTypes: [...previous.requirementTypes, created] })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } } }, [data.requirementTypes, handleApiError])
   const updateRequirementType = useCallback(async (id: string, input: Partial<RequirementType>): Promise<OperationResult> => { try { const updated: RequirementType = API_MODE ? await apiRequest(`/requirement-types/${id}`, { method: 'PATCH', body: JSON.stringify(input) }) : { ...data.requirementTypes.find((item) => item.id === id)!, ...input }; setData((previous) => ({ ...previous, requirementTypes: previous.requirementTypes.map((item) => item.id === id ? updated : item) })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } } }, [data.requirementTypes, handleApiError])
   const updateRequirementDefaults = useCallback(async (input: Partial<RequirementDefaults>): Promise<OperationResult> => { try { const payload = { ...input, clearAssignee: input.assigneeId === null, clearReviewer: input.reviewerId === null, clearRequirementType: input.requirementTypeId === null, clearDueDateOffset: input.dueDateOffsetDays === null }; const updated: RequirementDefaults = API_MODE ? await apiRequest('/requirement-defaults', { method: 'PATCH', body: JSON.stringify(payload) }) : { ...data.requirementDefaults, ...input }; setData((previous) => ({ ...previous, requirementDefaults: updated })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } } }, [data.requirementDefaults, handleApiError])
   const updateBranding = useCallback(async (projectName: string): Promise<OperationResult> => { try { const branding: SystemBranding = API_MODE ? await apiRequest('/system-branding', { method: 'PATCH', body: JSON.stringify({ projectName }) }) : { ...data.branding, projectName, updatedAt: nowIso() }; setData((previous) => ({ ...previous, branding })); return { ok: true } } catch (error) { return { ok: false, reason: handleApiError(error) } } }, [data.branding, handleApiError])

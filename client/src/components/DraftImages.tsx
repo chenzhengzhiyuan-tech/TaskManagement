@@ -1,3 +1,4 @@
+import { uuid } from '../uuid'
 import { useEffect, useRef, useState } from 'react'
 
 export interface DraftImage { id: string; file: File; url: string; progress: number; done: boolean; error?: string }
@@ -9,7 +10,7 @@ export function DraftImages({ items, setItems, disabled }: { items: DraftImage[]
     if (disabled) return
     const valid = files.filter(file => ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type) && file.size > 0 && file.size <= 500 * 1024 * 1024)
     setError(valid.length !== files.length ? '部分文件不符合要求：仅支持 JPG、PNG、GIF、WebP，每张最大 500MB' : '')
-    setItems(previous => [...previous, ...valid.map(file => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), progress: 0, done: false }))])
+    setItems(previous => [...previous, ...valid.map(file => ({ id: uuid(), file, url: URL.createObjectURL(file), progress: 0, done: false }))])
   }
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {

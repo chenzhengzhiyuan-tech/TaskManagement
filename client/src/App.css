@@ -1,4 +1,31 @@
 /* Collaboration components; shared theme and layout are in index.css. */
+:root { --requirement-field-text: #fff; }
+:root[data-theme=light] { --requirement-field-text: #000; }
+.create-modal, .requirement-drawer { --select-text: var(--requirement-field-text); }
+:root[data-theme] .create-modal input,
+:root[data-theme] .create-modal textarea,
+:root[data-theme] .requirement-drawer input,
+:root[data-theme] .requirement-drawer textarea { color: var(--requirement-field-text); }
+.create-fields { display: grid; gap: 16px; }
+.create-fields .form-grid { gap: 16px; }
+.create-fields .field { margin: 0; gap: 6px; }
+.create-fields .new-children-section { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.create-fields .new-children-section > h3 { margin: 0; font-size: 10px; font-weight: 400; line-height: normal; }
+.create-fields .new-children-section > p { margin: 0; }
+.create-fields .field--description > span { font-weight: 700; }
+:root .create-modal .field > span,
+:root .create-modal h3,
+:root .create-modal .new-children-section > h3,
+:root .requirement-drawer .detail-grid label > span,
+:root .requirement-drawer .detail-assignees > span,
+:root .requirement-drawer .detail-section h3,
+:root .create-modal input, :root .create-modal select, :root .create-modal textarea,
+:root .requirement-drawer input, :root .requirement-drawer select, :root .requirement-drawer textarea,
+:root .create-modal .assignee-picker > button,
+:root .requirement-drawer .assignee-picker > button,
+:root .create-modal .parent-picker__selected > span,
+:root .requirement-drawer .parent-picker__selected > span,
+:root .requirement-drawer .description-content { color: var(--requirement-field-text); }
 /* Iteration collaboration improvements */
 .multi-filter__actions { display: flex; gap: 8px; border-bottom: 1px solid var(--border, #36363b); margin-bottom: 5px; }
 .multi-filter__actions button { flex: 1; }
@@ -31,3 +58,86 @@
 .comment-content .attachment-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-top: 10px; }
 .comment-list .attachment-tile { display: block; padding: 0; border: 1px solid var(--border); }
 .comment-list .comment-text { color: var(--text); font-size: 12px; }
+
+/* Shared menus follow the application's 12px control typography. */
+.dropdown-menu.assignee-picker__menu, .dropdown-menu.multi-filter__menu { box-sizing: border-box; min-width: 0; overflow: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); font: inherit; font-size: 12px; line-height: 1.5; padding: 8px; }
+.dropdown-menu button, .dropdown-menu input, .dropdown-menu label { font: inherit; font-size: 12px; box-sizing: border-box; }
+.dropdown-menu .member-search { display: block; width: 100% !important; min-width: 0; padding: 8px; margin-bottom: 6px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.dropdown-menu .member-option { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px; color: var(--text); background: transparent; border: 0; border-radius: 4px; }
+.dropdown-menu .member-option > span { min-width: 0; overflow-wrap: anywhere; }
+.dropdown-menu .member-option small { display: block; margin: 0; font-size: 11px; color: var(--text-3); }
+.dropdown-menu .member-option:hover, .dropdown-menu .is-focused { background: var(--surface-2); }
+.dropdown-menu label { overflow-wrap: anywhere; }
+.dropdown-menu input[type=checkbox], .dropdown-menu input[type=radio] { flex-shrink: 0; width: 14px !important; height: 14px; }
+.dropdown-empty { padding: 8px; color: var(--text-3); }
+.multi-filter__actions { flex-wrap: wrap; }
+.multi-filter__actions button { white-space: nowrap; padding: 6px; min-width: 0; }
+.assignee-picker > button { font: inherit; font-size: 12px; overflow-wrap: anywhere; }
+.comment-editor .comment-members { position: relative; top: auto; left: auto; right: auto; width: 100%; box-sizing: border-box; max-height: 200px; margin-top: 4px; font-size: 12px; }
+.comment-members button { font: inherit; font-size: 12px; overflow-wrap: anywhere; }
+.comment-members button span { min-width: 0; overflow-wrap: anywhere; }
+.new-children-section { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 18px; }
+.new-children-section h3 { font-size: 14px; }
+.new-children-section p { color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.new-child { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin: 12px 0; }
+.new-child > header { display: flex; align-items: center; justify-content: space-between; padding: 0 0 10px; font-size: 13px; }
+.new-child textarea { min-height: 70px; }
+.existing-children > input { width: 100%; box-sizing: border-box; padding: 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 12px; }
+.existing-children__results { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px; }
+.existing-children__results label { display: flex; gap: 8px; align-items: flex-start; padding: 9px; font-size: 12px; overflow-wrap: anywhere; }
+.existing-children__results label input { flex: 0 0 14px; width: 14px; height: 14px; margin-top: 2px; }
+.existing-children__results label[aria-disabled=true] { color: var(--text-3); }
+.existing-children__results small { display: block; margin-top: 3px; }
+.child-selected { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.child-selected button { max-width: 100%; overflow-wrap: anywhere; text-align: left; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 5px; padding: 6px; font: inherit; font-size: 12px; }
+@media (max-width: 600px) { .new-child .form-grid { grid-template-columns: 1fr; } .create-modal { max-width: calc(100vw - 16px); } }
+
+.create-modal .detail-section > p { font-size: 12px; line-height: 1.6; color: var(--text-3); }
+
+/* Compact relationship controls match the neighbouring detail fields. */
+.detail-grid .detail-assignees > span { font-size: 10px; color: var(--text-3); }
+.detail-grid .assignee-picker { min-width: 0; }
+.detail-grid .assignee-picker > button { min-height: 30px; height: 30px; padding: 0 6px; border: 1px solid var(--border); background: var(--surface); font-size: 10px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-grid .assignee-picker > button:hover { border-color: var(--border); background: var(--surface-2); }
+.detail-relations .detail-parent-field { margin-top: 0; margin-bottom: 18px; gap: 7px; }
+.detail-relations .parent-picker__search { height: 30px; border-radius: 6px; padding: 0 8px; }
+.detail-relations .parent-picker__search input { height: 28px !important; min-height: 0; font-size: 10px; }
+.detail-relations .parent-picker__selected { min-height: 30px; padding: 0 5px 0 8px; border-radius: 6px; }
+.detail-relations .parent-picker__selected > span { font-size: 10px; }
+.detail-relations .existing-children > input { height: 30px; padding: 0 8px; font-size: 10px; }
+.relation-options.dropdown-menu { box-sizing: border-box; min-width: 0; margin: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 6px; box-shadow: var(--shadow); font-size: 12px; }
+.relation-options > button { display: block; width: 100%; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left; font: inherit; overflow-wrap: anywhere; }
+.relation-options > button:hover, .relation-options > button[aria-selected=true] { background: var(--surface-2); }
+.relation-options > button small { display: block; margin-top: 4px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.relation-options > label { border-radius: 5px; }
+.relation-options > label:hover { background: var(--surface-2); }
+.relation-options > label > span { min-width: 0; }
+.relation-options > label small { color: var(--text-3); line-height: 1.5; font-size: 11px; }
+
+/* Creation and detail use the same compact field typography and controls. */
+.create-modal .field > span,
+.requirement-drawer .detail-grid label > span,
+.requirement-drawer .detail-assignees > span { font-size: 10px; line-height: 1.5; font-weight: 400; }
+.create-modal .field--description > span { font-weight: 700; }
+.create-modal .field input,
+.create-modal .field select,
+.create-modal .assignee-picker > button,
+.create-modal .existing-children > input,
+.requirement-drawer .detail-grid input,
+.requirement-drawer .detail-grid select,
+.requirement-drawer .detail-grid .assignee-picker > button {
+  min-height: 30px; height: 30px; padding: 0 6px; border-radius: 6px;
+  font-family: inherit; font-size: 10px; font-weight: 400; line-height: 1.5;
+}
+.create-modal .assignee-picker > button,
+.requirement-drawer .detail-grid .assignee-picker > button { border: 1px solid var(--border); background: var(--surface); }
+.create-modal .parent-picker__search { height: 30px; padding: 0 8px; border-radius: 6px; }
+.create-modal .parent-picker__search input { height: 28px !important; min-height: 0; font-size: 10px; font-weight: 400; }
+.create-modal .parent-picker__selected { min-height: 30px; padding: 0 5px 0 8px; border-radius: 6px; }
+.create-modal .parent-picker__selected > span { font-size: 10px; }
+.create-modal .field textarea,
+.requirement-drawer .description-editor,
+.requirement-drawer .description-content { font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.8; }
+.create-modal .field--description > span,
+.create-modal .new-children-section > h3,
+.create-modal .section-heading > h3 { font-size: 11px; font-weight: 700; line-height: 1.5; }

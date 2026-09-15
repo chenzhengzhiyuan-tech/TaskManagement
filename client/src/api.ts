@@ -25,7 +25,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
   if (!response.ok) { const error = await parseError(response); throw new ApiError(response.status, error.message, error.body) }
   if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const text = await response.text()
+  return text.trim() ? JSON.parse(text) as T : undefined as T
 }
 
 export async function apiBlob(path: string): Promise<Blob> {

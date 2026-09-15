@@ -1,3 +1,5 @@
+import { uuid } from '../uuid'
+import { ExistingChildren, NewChildren } from './NewChildren'
 import { AssigneePicker } from './AssigneePicker'
 import { assigneeIds } from '../assignees'
 import { CalendarDays, Plus, X } from 'lucide-react'
@@ -22,6 +24,9 @@ export function NewRequirementModal({ open, onClose, onCreated }: NewRequirement
     description: requirementDefaults.descriptionTemplate ?? '',
   }), [requirementDefaults, modules, requirementTypes, currentIteration?.id])
   const [form, setForm] = useState<CreateRequirementInput>(buildDefault)
+  const [children, setChildren] = useState<CreateRequirementInput[]>([])
+  const [existingChildIds, setExistingChildIds] = useState<string[]>([])
+  const submission = useRef({key: '', id: ''})
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const busy = useRef(false)
@@ -35,7 +40,7 @@ export function NewRequirementModal({ open, onClose, onCreated }: NewRequirement
   const wasOpen = useRef(false)
   useEffect(() => {
     // A background iteration refresh must not erase a draft already being edited.
-    if (open && !wasOpen.current) { setForm(buildDefault()); setError(''); clearImages() }
+    if (open && !wasOpen.current) { setForm(buildDefault()); setChildren([]); setExistingChildIds([]); submission.current = {key: '', id: ''}; setError(''); clearImages() }
     wasOpen.current = open
   }, [open, buildDefault])
   function resetAndClose() { if (busy.current) return; const id = createdId; clearImages(); setForm(buildDefault()); setError(''); if (id) onCreated(id); else onClose() }
@@ -44,9 +49,15 @@ export function NewRequirementModal({ open, onClose, onCreated }: NewRequirement
     if (!form.title.trim()) { setError('请填写需求标题'); return }
     if (!form.description.trim()) { setError('请填写需求描述'); return }
     if (!form.requirementTypeId) { setError('请选择需求单类型'); return }
+    const invalid = children.findIndex(child => !child.title.trim() || !child.description.trim() || !child.requirementTypeId)
+    if (invalid >= 0) { setError(`第 ${invalid + 1} 个子需求：请填写标题、描述和需求类型`); document.querySelector<HTMLInputElement>(`[aria-label="子需求 ${invalid + 1} 标题"]`)?.focus(); return }
+    if (form.parentId && (children.length || existingChildIds.length)) { setError('不能同时指定父需求并创建子需求'); return }
     busy.current = true; setSubmitting(true)
     try {
-      const id = createdId ?? await createRequirement({ ...form, title: form.title.trim(), description: form.description.trim() })
+      const payload = { ...form, title: form.title.trim(), description: form.description.trim() }
+      const key = JSON.stringify({payload, children, existingChildIds})
+      if (submission.current.key !== key) submission.current = {key, id: uuid()}
+      const id = createdId ?? await createRequirement(payload, {requestId: submission.current.id, children, existingChildIds})
       setCreatedId(id)
       let failed = false
       for (const image of images.filter(image => !image.done)) {
@@ -66,7 +77,7 @@ export function NewRequirementModal({ open, onClose, onCreated }: NewRequirement
   return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && resetAndClose()}><div className="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
     <header><div><span className="eyebrow">NEW REQUIREMENT</span><h2 id="create-title">新建需求</h2></div><button className="icon-button" type="button" aria-label="关闭新建需求" onClick={resetAndClose}><X size={18}/></button></header>
     <div className="create-modal__body">
-      <fieldset disabled={submitting || Boolean(createdId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset className="create-fields" disabled={submitting || Boolean(createdId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <label className="field field--wide"><span>需求标题 <em>*</em></span><input autoFocus value={form.title} onChange={(event)=>{setForm({...form,title:event.target.value});setError('')}} placeholder="用一句话清晰描述需求"/></label>
       <div className="form-grid">
         <label className="field"><span>需求单类型 <em>*</em></span><select value={form.requirementTypeId ?? ''} onChange={(event)=>setForm({...form,requirementTypeId:event.target.value||null})}><option value="">请选择</option>{requirementTypes.filter((item)=>item.enabled).map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -74,12 +85,20 @@ export function NewRequirementModal({ open, onClose, onCreated }: NewRequirement
         <label className="field"><span>优先级</span><select value={form.priority} onChange={(event)=>setForm({...form,priority:event.target.value as Priority})}>{(Object.keys(priorityLabel) as Priority[]).map((item)=><option key={item} value={item}>{priorityLabel[item]}</option>)}</select></label>
         <label className="field"><span>初始状态</span><select value={form.statusId} onChange={(event)=>setForm({...form,statusId:event.target.value})}>{statuses.map((item)=><option key={item.id} value={item.id} disabled={currentUser.role==='developer'&&item.protected}>{item.name}</option>)}</select></label>
         <div className="field"><span>处理人</span><AssigneePicker users={activeUsers} value={assigneeIds(form)} onChange={ids => setForm({...form, assigneeIds: ids, assigneeId: ids[0] ?? null})} /></div>
-        <label className="field"><span>验收人</span><select value={form.reviewerId ?? ''} onChange={(event)=>setForm({...form,reviewerId:event.target.value||null})}><option value="">暂不指定</option>{activeUsers.map((user)=><option key={user.id} value={user.id}>{user.name}</option>)}</select></label>
+        <div className="field"><span>验收人</span><AssigneePicker label="验收人" single users={activeUsers} value={form.reviewerId ? [form.reviewerId] : []} onChange={ids => setForm({...form, reviewerId: ids[0] ?? null})}/></div>
         <label className="field"><span>所属迭代</span><select value={form.iterationId ?? ''} onChange={(event)=>setForm({...form,iterationId:event.target.value||null})}><option value="">需求池</option>{iterations.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="field"><span>期望完成时间</span><div className="input-with-icon"><CalendarDays size={15}/><input type="date" value={form.dueDate ?? ''} onChange={(event)=>setForm({...form,dueDate:event.target.value||null})}/></div></label>
-        <div className="field field--wide"><span>父需求</span><ParentRequirementPicker requirements={requirements} value={form.parentId} onChange={(parentId)=>setForm({...form,parentId})}/></div>
       </div>
-      <label className="field field--wide"><span>需求描述 <em>*</em></span><textarea value={form.description} onChange={(event)=>{setForm({...form,description:event.target.value});setError('')}} placeholder="输入需求背景、目标、范围和验收说明…"/></label>
+      <label className="field field--wide field--description"><span>需求描述 <em>*</em></span><textarea value={form.description} onChange={(event)=>{setForm({...form,description:event.target.value});setError('')}} placeholder="输入需求背景、目标、范围和验收说明…"/></label>
+      <section className="new-children-section"><h3>父需求</h3><ParentRequirementPicker requirements={requirements} value={form.parentId} onChange={(parentId)=>setForm({...form,parentId})}/></section>
+      <section className="new-children-section"><h3>子需求</h3><p>关联已有需求，或批量新建直接子需求。最多 100 条。</p>
+        {form.parentId ? <p>当前需求已指定父需求，不能继续创建孙需求。清空父需求后可添加子需求。</p> : <>
+          <ExistingChildren selected={existingChildIds} onChange={setExistingChildIds}/>
+          <NewChildren rows={children} onChange={setChildren}/>
+          <button className="button button--ghost" type="button" disabled={children.length + existingChildIds.length >= 100} onClick={() => setChildren([...children, {...form, title: '', description: '', parentId: null, statusId: 'todo', assigneeIds: [...assigneeIds(form)]}])}>新增子需求一行</button>
+          {!!children.length && <p>新增行带入当前父需求的字段，可逐行修改；之后修改父需求不会覆盖已填行。</p>}
+        </>}
+      </section>
       </fieldset>
       <DraftImages items={images} setItems={setImages} disabled={submitting} />
       {error&&<div className="form-error" role="alert">{error}</div>}

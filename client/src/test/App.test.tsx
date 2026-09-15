@@ -20,6 +20,7 @@ async function loginAs(account = 'admin') {
 
 describe('客户端核心流程', () => {
   beforeEach(() => {
+    window.history.replaceState({}, '', '/')
     localStorage.clear()
     sessionStorage.clear()
   })
@@ -46,6 +47,21 @@ describe('客户端核心流程', () => {
     await user.click(screen.getAllByRole('button', { name: /示例管理员/ })[0])
     await user.click(screen.getByRole('button', { name: '退出登录' }))
     expect(screen.getByRole('heading', { name: '登录 G43' })).toBeInTheDocument()
+  })
+
+  it('刷新后保留看板及其打开的需求详情', async () => {
+    const first = renderApp()
+    const user = await loginAs()
+    await user.click(screen.getByRole('button', { name: '看板' }))
+    expect(new URLSearchParams(window.location.search).get('page')).toBe('board')
+    first.unmount()
+    const url = new URL(window.location.href)
+    url.searchParams.set('requirement', 'REQ-0048')
+    window.history.replaceState({}, '', url)
+    renderApp()
+    expect(screen.getByRole('heading', { name: '看板' })).toBeInTheDocument()
+    expect(screen.getByLabelText('REQ-0048 需求详情')).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get('page')).toBe('board')
   })
 
   it('创建需求时校验必填项并使用基础字段', async () => {
@@ -114,5 +130,3 @@ describe('客户端核心流程', () => {
     expect(screen.getAllByText('未绑定成员').length).toBeGreaterThan(0)
   })
 })
-
-

@@ -18,7 +18,17 @@ function App() {
   const { authenticated, initializing, branding } = useAppStore()
   useEffect(() => applyTheme(getTheme()), [])
   useEffect(() => { document.title = `${branding.projectName} · 需求协作平台` }, [branding.projectName])
-  const [page, setPage] = useState<PageKey>('dashboard')
+  const [page, setPage] = useState<PageKey>(() => {
+    const params = new URLSearchParams(window.location.search)
+    const saved = params.get('page')
+    return saved && ['dashboard', 'requirements', 'iterations', 'board', 'reports', 'settings'].includes(saved)
+      ? saved as PageKey : params.has('requirement') ? 'requirements' : 'dashboard'
+  })
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('page', page)
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [page])
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createdNotice, setCreatedNotice] = useState('')
@@ -40,7 +50,7 @@ function App() {
   useEffect(() => {
     if (!authenticated) return
     const requirementId = new URLSearchParams(window.location.search).get('requirement')
-    if (requirementId) { setPage('requirements'); setSelectedRequirementId(requirementId) }
+    if (requirementId) setSelectedRequirementId(requirementId)
   }, [authenticated])
 
   const openNew = useCallback(() => setCreateOpen(true), [])

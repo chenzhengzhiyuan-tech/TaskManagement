@@ -1,3 +1,4 @@
+import { uuid } from '../uuid'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { MessageSquare, Send, Upload, X } from 'lucide-react'
@@ -70,7 +71,7 @@ export function CommentsPanel({ requirement, visible, onDirtyChange, onOpenImage
       if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type) || !file.size || file.size > 500 * 1024 * 1024) {
         problem = '仅支持 JPG、PNG、GIF、WebP 图片，单张不超过 500MB'; continue
       }
-      valid.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) })
+      valid.push({ id: uuid(), file, url: URL.createObjectURL(file) })
     }
     setImages(previous => [...previous, ...valid]); setError(problem)
   }
@@ -90,7 +91,7 @@ export function CommentsPanel({ requirement, visible, onDirtyChange, onOpenImage
         attachmentIds.push(uploaded.id)
       }
       const key = JSON.stringify({ text, mentions, attachmentIds })
-      if (submission.current.key !== key) submission.current = { key, id: crypto.randomUUID() }
+      if (submission.current.key !== key) submission.current = { key, id: uuid() }
       await addComment(requirement.id, text, { requestId: submission.current.id, mentions, attachmentIds })
       setText(''); setMentions([]); images.forEach(image => URL.revokeObjectURL(image.url)); setImages([])
       submission.current = { key: '', id: '' }; uploadedImages.current.clear()
