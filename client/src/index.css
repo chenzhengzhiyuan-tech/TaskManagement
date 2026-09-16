@@ -51,7 +51,7 @@
 .requirements-table--tree .tree-toggle{width:22px!important;height:22px!important;min-height:22px!important;display:grid!important;grid-template-columns:1fr!important;place-items:center!important;align-self:center;margin:0!important;padding:0!important;gap:0!important;border:1px solid rgba(10,132,255,.78)!important;border-radius:5px!important;background:rgba(10,132,255,.18)!important;color:#76bdff!important;box-shadow:0 0 0 2px rgba(10,132,255,.08),0 0 14px rgba(10,132,255,.12);line-height:1!important}
 .requirements-table--tree .tree-toggle svg{display:block;width:13px;height:13px;stroke-width:2.4}
 .requirements-table--tree .tree-toggle:hover{border-color:#64b5ff!important;background:rgba(10,132,255,.3)!important;color:#fff!important;box-shadow:0 0 0 3px rgba(10,132,255,.13),0 0 18px rgba(10,132,255,.22)}
-.requirements-table--tree .tree-toggle--empty{border-color:transparent!important;background:transparent!important;box-shadow:none!important}
+.requirements-table--tree .tree-toggle--empty{visibility:hidden;pointer-events:none;border-color:transparent!important;background:transparent!important;box-shadow:none!important}
 .requirements-table--tree .requirement-title-main{width:100%;display:grid!important;grid-template-columns:72px minmax(0,1fr) auto auto!important;align-items:center!important;gap:7px!important;padding:0!important}
 .requirements-table--tree .requirement-title-block{gap:0}
 .requirements-table--tree .tree-node--child::before{left:10px;top:-27px;bottom:50%}
