@@ -61,3 +61,26 @@ it('dropdown opens upward near the bottom edge without inheriting top:100%', () 
     expect(Number.parseFloat(menu.style.left) + Number.parseFloat(menu.style.width)).toBeLessThanOrEqual(window.innerWidth - 8)
   } finally { rect.mockRestore() }
 })
+
+it('member search receives focus only at the anchored dropdown position', () => {
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({top: 200, bottom: 230, left: 500, right: 650, width: 150, height: 30} as DOMRect)
+  const positions: string[] = []
+  const focus = (event: FocusEvent) => {
+    if ((event.target as HTMLElement)?.getAttribute('aria-label') === '搜索处理人') {
+      positions.push((event.target as HTMLElement).closest<HTMLElement>('.dropdown-menu')!.style.left)
+    }
+  }
+  document.addEventListener('focusin', focus)
+  try {
+    render(<AssigneePicker users={initialData.users} value={[]} onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '处理人' }))
+    expect(positions).toEqual(['500px'])
+    fireEvent.change(screen.getByLabelText('搜索处理人'), { target: { value: 'L' } })
+    fireEvent.change(screen.getByLabelText('搜索处理人'), { target: { value: '示例' } })
+    expect(positions).toEqual(['500px'])
+    fireEvent.click(screen.getByRole('button', { name: '处理人' }))
+    rect.mockReturnValue({top: 250, bottom: 280, left: 300, right: 450, width: 150, height: 30} as DOMRect)
+    fireEvent.click(screen.getByRole('button', { name: '处理人' }))
+    expect(positions).toEqual(['500px', '300px'])
+  } finally { document.removeEventListener('focusin', focus); rect.mockRestore() }
+})

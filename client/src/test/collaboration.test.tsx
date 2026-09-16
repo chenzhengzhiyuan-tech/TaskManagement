@@ -20,10 +20,10 @@ beforeEach(() => {
   } as unknown as ReturnType<typeof useAppStore>)
 })
 
-it('默认当前迭代、全选再排除，并保留手动清空选择', () => {
+it('默认不筛选迭代，全选再排除，并保留手动清空选择', () => {
   const view = render(<BoardPage onOpenRequirement={() => {}} />)
   fireEvent.click(screen.getByLabelText('迭代筛选'))
-  expect(screen.getByRole('checkbox', { name: '20260824-20260828' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: '20260824-20260828' })).not.toBeChecked()
   fireEvent.click(within(screen.getByRole('group', { name: '迭代选项' })).getByRole('button', { name: '全选' }))
   expect(screen.getAllByRole('checkbox').every(box => (box as HTMLInputElement).checked)).toBe(true)
   fireEvent.click(screen.getByRole('checkbox', { name: '20260824-20260828' }))
@@ -34,7 +34,7 @@ it('默认当前迭代、全选再排除，并保留手动清空选择', () => {
   expect(screen.getByLabelText('迭代筛选')).toHaveTextContent('全部迭代')
 })
 
-it('手动选择当前迭代后也不随周切换改变；默认选择会跟随', () => {
+it('手动选择迭代后保持用户选择', () => {
   const store = useAppStore()
   const view = render(<BoardPage onOpenRequirement={() => {}} />)
   fireEvent.click(screen.getByLabelText('迭代筛选'))
@@ -42,7 +42,7 @@ it('手动选择当前迭代后也不随周切换改变；默认选择会跟随'
   const iterations = store.iterations.map(item => ({ ...item, state: (item.id === 'it-next' ? 'active' : 'completed') as 'active' | 'completed' }))
   vi.mocked(useAppStore).mockReturnValue({ ...store, iterations })
   view.rerender(<BoardPage onOpenRequirement={() => {}} />)
-  expect(screen.getByRole('checkbox', { name: '20260824-20260828' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: '20260824-20260828' })).not.toBeChecked()
   expect(screen.getByRole('checkbox', { name: '20260831-20260904' })).not.toBeChecked()
 })
 

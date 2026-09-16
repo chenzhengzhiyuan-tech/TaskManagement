@@ -50,6 +50,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<string[]>([])
   const [collapsedParents, setCollapsedParents] = useState<string[]>([])
+  const [showStructure, setShowStructure] = useState(false)
   const [toast, setToast] = useState('')
   const [bulkAssignee, setBulkAssignee] = useState<string[]>([])
   const [bulkIteration, setBulkIteration] = useState('')
@@ -108,7 +109,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
   const groups = mode === 'api' ? apiTree?.groups ?? [] : localGroups
   const pageCount = Math.max(1, Math.ceil(rootCount / PAGE_SIZE))
   const visibleGroups = mode === 'api' ? groups : groups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const visibleItems = visibleGroups.flatMap((group) => { const expanded = hasCriteria || !collapsedParents.includes(group.root.id); return [group.root, ...(expanded ? group.children : [])] })
+  const visibleItems = visibleGroups.flatMap((group) => { const expanded = hasCriteria || !collapsedParents.includes(group.root.id); return [(!hasCriteria || showStructure || group.rootMatches) ? group.root : null, ...(expanded ? group.children : [])].filter(Boolean) as Requirement[] })
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount)
@@ -177,7 +178,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
         <td className="title-cell">
           <div className={`tree-node ${isChild ? 'tree-node--child' : 'tree-node--root'}`}>
             {isChild ? <span className="tree-connector" aria-hidden="true" /> : childCount > 0 ? <button className="tree-toggle" type="button" aria-label={`${collapsed ? '展开' : '收起'} ${item.id} 子需求`} onClick={() => toggleParent(item.id)}>{collapsed ? <Plus size={12} /> : <Minus size={12} />}</button> : <span className="tree-toggle tree-toggle--empty" />}
-            <div className="requirement-title-block"><button className="requirement-title-main" type="button" onClick={() => onOpenRequirement(item.id)}><span className="mono-id">{item.id}</span><strong>{item.title}</strong>{!isChild && childCount > 0 && <span className="child-count" title={`${childCount} 条子需求`}><FolderTree size={12} />{childCount}</span>}{contextOnly && <span className="context-match-dot" title="筛选结果来自下级节点" />}</button></div>
+            <div className="requirement-title-block"><button className="requirement-title-main" type="button" onClick={() => onOpenRequirement(item.id)}><span className="mono-id">{item.id}</span><strong>{item.title}</strong>{contextOnly && <span className="context-match-dot" title="筛选结果来自下级节点" />}</button></div>
           </div>
         </td>
         <td><span className="requirement-type-cell" style={{ '--type-color': requirementType?.color ?? '#8E8E93' } as React.CSSProperties}>{requirementType?.name ?? '未设置'}</span></td>
@@ -197,6 +198,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
       <header className="page-header"><div><span className="eyebrow">REQUIREMENTS</span><h1>需求</h1><p>以顶层需求为排序和分页单位，子需求始终跟随父需求展示。</p></div><div className="page-header__summary"><span>{resultCount}</span><small>{rootCount} 个顶层需求</small></div></header>
 
       <RequirementFilters mine={mine} setMine={value => { setMine(value); setPage(1) }} query={query} setQuery={value => { setQuery(value); setPage(1) }} values={[statusFilter, assigneeFilter, priorityFilter, iterationFilter, typeFilter]} setters={[setStatusFilter, setAssigneeFilter, setPriorityFilter, setIterationFilter, setTypeFilter].map(set => value => { set(value); setPage(1) })}>
+        {hasCriteria && <button className="button button--ghost button--compact" type="button" aria-pressed={showStructure} onClick={() => setShowStructure(value => !value)}><FolderTree size={14} />{showStructure ? '隐藏未命中父任务' : '显示父子结构'}</button>}
         {currentUser.role === 'admin' && <button className="button button--ghost button--compact" onClick={() => setImportOpen(true)}><FileUp size={14} />导入</button>}
         <button className="button button--ghost button--compact" onClick={() => setBatchOpen(true)}><Plus size={14} />批量新建</button>
         <button className="button button--ghost button--compact" onClick={exportCsv}><FileDown size={14} />导出</button>
@@ -210,7 +212,7 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
       <section className="requirements-table-wrap">
         <table className="requirements-table requirements-table--tree">
           <thead><tr><th className="check-cell"><input aria-label="选择当前页" type="checkbox" checked={visibleItems.length > 0 && visibleItems.every((item) => selected.includes(item.id))} onChange={(event) => setSelected(event.target.checked ? Array.from(new Set([...selected, ...visibleItems.map((item) => item.id)])) : selected.filter((id) => !visibleItems.some((item) => item.id === id)))} /></th><th>需求树</th><th>需求单类型</th><th>状态</th><th>处理人</th><th>优先级</th><th>模块</th><th>迭代</th><th>期望完成</th><th>更新时间</th></tr></thead>
-          <tbody>{visibleGroups.flatMap((group) => { const expanded = hasCriteria || !collapsedParents.includes(group.root.id); return [renderRow(group.root, null, requirements.filter((item)=>item.parentId===group.root.id).length, !group.rootMatches), ...(expanded ? group.children.map((child) => renderRow(child, group.root, 0)) : [])] })}</tbody>
+          <tbody>{visibleGroups.flatMap((group) => { const expanded = hasCriteria || !collapsedParents.includes(group.root.id); return [...((!hasCriteria || showStructure || group.rootMatches) ? [renderRow(group.root, null, requirements.filter((item)=>item.parentId===group.root.id).length, !group.rootMatches)] : []), ...(expanded ? group.children.map((child) => renderRow(child, (hasCriteria && !showStructure) ? null : group.root, 0)) : [])] })}</tbody>
         </table>
         {loading && <div className="list-loading">正在查询服务端…</div>}{!loading && !groups.length && <div className="empty-state"><Search size={28} /><strong>没有符合条件的需求</strong><span>尝试清空筛选条件或使用其他关键词</span><button className="button button--ghost" type="button" onClick={clearFilters}>清空筛选</button></div>}
       </section>
@@ -221,5 +223,3 @@ export function RequirementsPage({ initialQuery, onOpenRequirement }: Requiremen
     </div>
   )
 }
-
-

@@ -1,11 +1,13 @@
 import { useAppStore } from './store'
 import { useRequirementFilter } from './useRequirementFilter'
+import { useEffect } from 'react'
 
-// Persist intent, not the current week's ID: only the default follows a rollover.
-const CURRENT = '@current'
 export function useIterationFilter(userId: string) {
-  const { iterations } = useAppStore()
-  const [selection, setSelection] = useRequirementFilter(userId, 'iteration', CURRENT)
-  const currentId = iterations.find(item => item.state === 'active')?.id ?? ''
-  return [selection === CURRENT ? currentId : selection, setSelection] as const
+  useAppStore()
+  const [selection, setSelection] = useRequirementFilter(userId, 'iteration', '')
+  // @current was the old implicit default; clear it so the first view after
+  // this change shows all requirements. Explicit user selections remain saved.
+  const normalized = selection === '@current' ? '' : selection
+  useEffect(() => { if (selection === '@current') setSelection('') }, [selection, setSelection])
+  return [normalized, setSelection] as const
 }
