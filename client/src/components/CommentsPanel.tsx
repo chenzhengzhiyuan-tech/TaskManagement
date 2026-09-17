@@ -1,3 +1,6 @@
+import { ConfirmDialog } from './ConfirmDialog'
+import { attachmentAccept, attachmentError, attachmentHint, attachmentType, isVideo } from '../attachmentMedia'
+import { DraftMediaPreview } from './MediaContent'
 import { uuid } from '../uuid'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -24,9 +27,12 @@ export function CommentsPanel({ requirement, visible, onDirtyChange, onOpenImage
   requirement: Requirement; visible: boolean; onDirtyChange: (dirty: boolean) => void;
   onOpenImage: (attachment: Attachment) => void; onDownloadImage: (attachment: Attachment) => void;
 }) {
-  const { users, addComment, uploadAttachment } = useAppStore()
+  const { users, currentUser, addComment, deleteComment, uploadAttachment } = useAppStore()
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const deleting = useRef(false)
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<CommentMention[]>([])
+  const [preview, setPreview] = useState<DraftImage | null>(null)
   const [images, setImages] = useState<DraftImage[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -68,8 +74,8 @@ export function CommentsPanel({ requirement, visible, onDirtyChange, onOpenImage
   function addImages(files: File[]) {
     const valid: DraftImage[] = []; let problem = ''
     for (const file of files) {
-      if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type) || !file.size || file.size > 500 * 1024 * 1024) {
-        problem = '仅支持 JPG、PNG、GIF、WebP 图片，单张不超过 500MB'; continue
+      if (attachmentError(file)) {
+        problem = `${file.name}：${attachmentError(file)}`; continue
       }
       valid.push({ id: uuid(), file, url: URL.createObjectURL(file) })
     }
@@ -129,21 +135,28 @@ export function CommentsPanel({ requirement, visible, onDirtyChange, onOpenImage
       </div>
       {mentions.length > 0 && <div className="comment-editor__recipients">将提醒：{[...new Set(mentions.map(mention => mention.name))].join('、')}</div>}
       {images.length > 0 && <div className="comment-draft-images">{images.map(image => <figure key={image.id}>
-        <a href={image.url} target="_blank" rel="noreferrer" aria-label={`预览待发送图片 ${image.file.name}`}><img src={image.url} alt={image.file.name} /></a>
+        <button type="button" className="comment-draft-preview" onClick={() => setPreview(image)} aria-label={`预览待发送附件 ${image.file.name}`}>{isVideo(attachmentType(image.file)) ? <span className="video-placeholder">▶<small>视频</small></span> : <img src={image.url} alt={image.file.name} />}</button>
         <figcaption title={image.file.name}>{image.file.name}</figcaption><button type="button" disabled={busy} aria-label={`移除 ${image.file.name}`} onClick={() => { URL.revokeObjectURL(image.url); setImages(previous => previous.filter(entry => entry.id !== image.id)) }}><X size={14} /></button>
       </figure>)}</div>}
-      <div className="comment-editor__actions"><button className="button button--ghost button--compact" type="button" disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={14} />添加图片</button>
+      <div className="comment-editor__actions"><button className="button button--ghost button--compact" type="button" disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={14} />添加附件</button>
         <span>Enter 换行 · Ctrl+Enter 发送</span><button className="button button--primary button--compact" type="button" disabled={busy || (!text.trim() && !images.length)} onClick={() => void send()}><Send size={14} />{busy ? '发送中…' : '发送'}</button></div>
-      <input hidden ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" aria-label="评论图片" disabled={busy} onChange={event => { addImages(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+      <input hidden ref={fileInput} type="file" multiple accept={attachmentAccept} aria-label="评论附件" disabled={busy} onChange={event => { addImages(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+      <p className="attachment-hint">{attachmentHint}</p>
+      {preview && <DraftMediaPreview url={preview.url} type={attachmentType(preview.file)} name={preview.file.name} onClose={() => setPreview(null)} />}
       {progress && <p role="status">{progress}</p>}{error && <p className="comment-error" role="alert">{error}</p>}
     </div>
+    <ConfirmDialog open={Boolean(deleteTarget)} title="删除评论" description="评论和其中的附件将一起删除，确定继续吗？" danger onClose={() => setDeleteTarget(null)} onConfirm={() => {
+      if (!deleteTarget || deleting.current) return
+      deleting.current = true
+      void deleteComment(requirement.id, deleteTarget).then(result => { if (result.ok) setDeleteTarget(null); else setError(result.reason ?? '删除失败') }).finally(() => { deleting.current = false })
+    }} />
     <div className="comment-list">
       {target && !requirement.comments.some(item => item.id === target) && <p role="status">该评论已不存在，下面展示当前讨论。</p>}
       {requirement.comments.length ? requirement.comments.map(item => {
         const author = getUser(users, item.authorId)
         return <article id={`comment-${item.id}`} className={target === item.id ? 'comment-target' : ''} key={item.id}>
           <span className="avatar avatar--small" style={{ '--avatar-color': author?.color } as React.CSSProperties}>{author?.initials}</span>
-          <div className="comment-content"><header><strong>{author?.name ?? '已删除成员'}</strong><time>{formatDate(item.createdAt, true)}</time></header>
+          <div className="comment-content"><header><strong>{author?.name ?? '已删除成员'}</strong><time>{formatDate(item.createdAt, true)}</time>{(currentUser.role === 'admin' || currentUser.id === item.authorId) && <button type="button" className="button button--ghost button--compact" aria-label={`删除评论 ${item.id}`} onClick={() => setDeleteTarget(item.id)}>删除</button>}</header>
             <p className="comment-text"><CommentText text={item.content} mentions={item.mentions} /></p>
             {!!item.attachments?.length && <div className="attachment-grid">{item.attachments.map(image => <AttachmentThumbnail key={image.id} attachment={image} onOpen={() => onOpenImage(image)} onDownload={() => onDownloadImage(image)} />)}</div>}
           </div>

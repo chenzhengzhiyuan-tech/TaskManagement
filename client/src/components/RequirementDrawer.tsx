@@ -1,3 +1,5 @@
+import { attachmentAccept, attachmentError, attachmentHint } from '../attachmentMedia'
+import { MediaContent } from './MediaContent'
 import { uuid } from '../uuid'
 import { AssigneePicker } from './AssigneePicker'
 import { assigneeIds, assigneeNames } from '../assignees'
@@ -67,10 +69,12 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const previewRequest = useRef(0)
+  useEffect(() => () => { previewRequest.current++ }, [])
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && requirementId) requestClose()
+      if (event.key === 'Escape' && requirementId) { if (previewAttachment) closePreview(); else requestClose() }
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && dirty) saveText()
     }
     window.addEventListener('keydown', handleKey)
@@ -127,8 +131,8 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
     setUploads(previous => [...previous, { id, name: file.name, progress: 0 }])
     const progress = (value: number) => setUploads(previous => previous.map(item => item.id === id ? { ...item, progress: value } : item))
     try {
-      if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) throw new Error('仅支持 JPG、PNG、GIF、WebP')
-      if (file.size > 500 * 1024 * 1024) throw new Error('单个附件不能超过500MB')
+      const validation = attachmentError(file)
+      if (validation) throw new Error(validation)
       await uploadAttachment(activeId, file, progress); progress(100)
     } catch (error) { setUploads(previous => previous.map(item => item.id === id ? { ...item, error: error instanceof Error ? error.message : '上传失败' } : item)) }
   }
@@ -137,6 +141,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
   }
 
   async function openAttachment(attachment: Attachment) {
+    const request = ++previewRequest.current
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewAttachment(attachment)
     setPreviewUrl(null)
@@ -144,16 +149,18 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
     setPreviewLoading(true)
     try {
       const blob = await loadAttachmentBlob(attachment)
-      if (!blob) { setPreviewError('当前图片只有附件记录，未找到本地文件。请重新上传后预览。'); return }
+      if (request !== previewRequest.current) return
+      if (!blob) { setPreviewError('当前附件只有附件记录，未找到本地文件。请重新上传后预览。'); return }
       setPreviewUrl(URL.createObjectURL(blob))
     } catch {
-      setPreviewError('图片读取失败，请重试。')
+      if (request === previewRequest.current) setPreviewError('附件读取失败，请重试。')
     } finally {
-      setPreviewLoading(false)
+      if (request === previewRequest.current) setPreviewLoading(false)
     }
   }
 
   function closePreview() {
+    previewRequest.current++
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewAttachment(null)
     setPreviewUrl(null)
@@ -163,7 +170,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
   async function downloadAttachment(attachment: Attachment) {
     try {
       const blob = await loadAttachmentBlob(attachment)
-      if (!blob) { setMessage('未找到图片文件，请重新上传'); return }
+      if (!blob) { setMessage('未找到附件文件，请重新上传'); return }
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -221,7 +228,7 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
             <button className="button button--ghost button--compact" type="button" onClick={() => void copyRequirementLink(requirement.id).then(() => setMessage('任务单地址已复制')).catch(() => setMessage('复制失败，请检查浏览器剪贴板权限'))}>
               <Link2 size={15} />复制地址
             </button>
-            <input ref={fileRef} hidden type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { void handleFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+            <input ref={fileRef} hidden type="file" multiple accept={attachmentAccept} onChange={(event) => { void handleFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
             {dirty && <button className="button button--primary button--compact drawer-save" onClick={() => void saveText()} type="button"><Save size={15} />保存</button>}
           </div>
 
@@ -287,12 +294,12 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
                 </section>
 
                 <section className="detail-section">
-                  <div className="section-heading"><h3>图片附件</h3><button type="button" onClick={() => fileRef.current?.click()}><Upload size={14} />上传图片</button></div>
+                  <div className="section-heading"><h3>附件</h3><button type="button" onClick={() => fileRef.current?.click()}><Upload size={14} />上传附件</button></div>
                   {requirement.attachments.length ? (
                     <div className="attachment-grid">
-                      {requirement.attachments.map(attachment => <AttachmentThumbnail key={attachment.id} attachment={attachment} onOpen={() => void openAttachment(attachment)} onDownload={() => void downloadAttachment(attachment)} onDelete={() => setDeleteImage(attachment)} />)}
+                      {requirement.attachments.map(attachment => <AttachmentThumbnail key={attachment.id} attachment={attachment} onOpen={() => void openAttachment(attachment)} onDownload={() => void downloadAttachment(attachment)} onDelete={currentUser.role === 'admin' || currentUser.id === attachment.uploadedBy ? () => setDeleteImage(attachment) : undefined} />)}
                     </div>
-                  ) : <button className="upload-empty" type="button" onClick={() => fileRef.current?.click()}><Upload size={20} /><strong>上传图片附件</strong><span>支持多选或 Ctrl+V 粘贴图片，单个最大500MB</span></button>}
+                  ) : <button className="upload-empty" type="button" onClick={() => fileRef.current?.click()}><Upload size={20} /><strong>上传附件</strong><span>{attachmentHint} 支持多选或粘贴图片</span></button>}
                 </section>
 
                 <section className="detail-section detail-section--danger">
@@ -326,12 +333,12 @@ export function RequirementDrawer({ requirementId, onClose, onOpenRequirement }:
       {previewAttachment && (
         <div className="modal-layer attachment-preview-layer" onMouseDown={(event) => event.target === event.currentTarget && closePreview()}>
           <section className="attachment-preview" role="dialog" aria-modal="true" aria-label={`预览 ${previewAttachment.name}`}>
-            <header><div><strong>{previewAttachment.name}</strong><span>{(previewAttachment.size / 1024 / 1024).toFixed(1)} MB</span></div><div><button className="button button--ghost button--compact" type="button" onClick={() => downloadAttachment(previewAttachment)}><Download size={14} />下载</button><button className="icon-button" type="button" aria-label="关闭图片预览" onClick={closePreview}><X size={18} /></button></div></header>
-            <div className="attachment-preview__body">{previewLoading ? <div className="attachment-preview__empty"><Upload size={26} /><span>正在读取图片…</span></div> : previewUrl ? <img src={previewUrl} alt={previewAttachment.name} onError={() => { setPreviewUrl(null); setPreviewError('图片格式无法读取，请下载检查原文件') }} /> : <div className="attachment-preview__empty"><ImageOff size={30} /><strong>无法预览</strong><span>{previewError}</span></div>}</div>
+            <header><div><strong>{previewAttachment.name}</strong><span>{(previewAttachment.size / 1024 / 1024).toFixed(1)} MB</span></div><div><button className="button button--ghost button--compact" type="button" onClick={() => downloadAttachment(previewAttachment)}><Download size={14} />下载</button><button className="icon-button" type="button" aria-label="关闭附件预览" onClick={closePreview}><X size={18} /></button></div></header>
+            <div className="attachment-preview__body">{previewLoading ? <div className="attachment-preview__empty"><Upload size={26} /><span>正在读取附件…</span></div> : previewUrl ? <MediaContent key={previewUrl} url={previewUrl} type={previewAttachment.type} name={previewAttachment.name} /> : <div className="attachment-preview__empty"><ImageOff size={30} /><strong>无法预览</strong><span>{previewError}</span></div>}</div>
           </section>
         </div>
       )}
-      <ConfirmDialog open={Boolean(deleteImage)} title="删除图片" description={`确定删除图片“${deleteImage?.name ?? ''}”？其他附件不受影响。`} onClose={() => setDeleteImage(null)} onConfirm={() => { if (deleteImage) void deleteAttachment(activeId, deleteImage.id).then(result => { if (!result.ok) setMessage(result.reason ?? '删除失败'); setDeleteImage(null) }) }} />
+      <ConfirmDialog open={Boolean(deleteImage)} title="删除附件" description={`确定删除附件“${deleteImage?.name ?? ''}”？其他附件不受影响。`} onClose={() => setDeleteImage(null)} onConfirm={() => { if (deleteImage) void deleteAttachment(activeId, deleteImage.id).then(result => { if (!result.ok) setMessage(result.reason ?? '删除失败'); setDeleteImage(null) }) }} />
       <ConfirmDialog
         open={deleteOpen}
         title={`永久删除 ${requirement.id}？`}

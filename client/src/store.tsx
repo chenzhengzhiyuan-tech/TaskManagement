@@ -1,3 +1,4 @@
+import { attachmentError, attachmentType } from './attachmentMedia'
 import { uuid } from './uuid'
 import type { CreateFamilyOptions } from './types'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
@@ -51,6 +52,7 @@ interface AppStoreValue extends AppData {
   updateRequirement: (id: string, patch: Partial<Requirement>, summary?: string) => Promise<boolean>
   moveRequirementStatus: (id: string, statusId: string) => Promise<OperationResult>
   deleteRequirement: (id: string) => Promise<boolean>
+  deleteComment: (id: string, commentId: string) => Promise<OperationResult>
   addComment: (id: string, content: string, options?: CommentOptions) => Promise<void>
   uploadAttachment: (id: string, file: File, onProgress?: (progress: number) => void, forComment?: boolean) => Promise<Attachment>
   deleteAttachment: (requirementId: string, attachmentId: string) => Promise<OperationResult>
@@ -322,12 +324,12 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
   }, [currentUser.role, data.requirements, handleApiError])
 
   const addComment = useCallback(async (id: string, content: string, options?: CommentOptions) => {
-    if (!content.trim() && !options?.attachmentIds.length) throw new Error('请输入评论或添加图片')
+    if (!content.trim() && !options?.attachmentIds.length) throw new Error('请输入评论或添加附件')
     if (API_MODE) {
       const created = await apiRequest<Comment>(`/requirements/${id}/comments`, { method: 'POST', body: JSON.stringify({ content, ...options }) })
       setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id !== id || item.comments.some(comment => comment.id === created.id) ? item : {
         ...item, comments: [...item.comments, created], updatedAt: created.createdAt, version: (item.version ?? 1) + 1,
-        history: [{ id: created.id, actorId: created.authorId, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: created.createdAt }, ...item.history],
+        history: [{ id: created.id, actorId: created.authorId, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了附件', createdAt: created.createdAt }, ...item.history],
       }) }))
       return
     }
@@ -337,13 +339,29 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       mentions: options?.mentions ?? [], attachments: (options?.attachmentIds ?? []).map(id => commentImages.current.get(id)).filter((image): image is Attachment => Boolean(image)) }
     setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id !== id || item.comments.some(entry => entry.id === comment.id) ? item : {
       ...item, version: (item.version ?? 1) + 1, updatedAt: timestamp, comments: [...item.comments, comment],
-      history: [{ id: uuid(), actorId: currentUser.id, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了图片', createdAt: timestamp }, ...item.history],
+      history: [{ id: uuid(), actorId: currentUser.id, action: '添加评论', detail: content.trim().slice(0, 60) || '添加了附件', createdAt: timestamp }, ...item.history],
     }) }))
   }, [currentUser.id, data.users])
 
+  const deleteComment = useCallback(async (id: string, commentId: string): Promise<OperationResult> => {
+    const comment = data.requirements.find(item => item.id === id)?.comments.find(item => item.id === commentId)
+    if (!comment || (currentUser.role !== 'admin' && comment.authorId !== currentUser.id)) return { ok: false, reason: '无权删除该评论' }
+    try {
+      if (API_MODE) { await apiRequest(`/requirements/${id}/comments/${commentId}`, { method: 'DELETE' }); await refresh() }
+      else {
+        await deleteAttachmentBlobs((comment.attachments ?? []).map(item => item.id))
+        setData(previous => ({ ...previous, requirements: previous.requirements.map(item => item.id === id ? { ...item, comments: item.comments.filter(entry => entry.id !== commentId), version: (item.version ?? 1) + 1, updatedAt: nowIso() } : item) }))
+      }
+      return { ok: true }
+    } catch (error) { return { ok: false, reason: handleApiError(error) } }
+  }, [currentUser.id, currentUser.role, data.requirements, handleApiError, refresh])
+
   const uploadAttachment = useCallback(async (id: string, file: File, onProgress?: (progress: number) => void, forComment = false) => {
+    const validation = attachmentError(file)
+    if (validation) throw new Error(validation)
+    const contentType = attachmentType(file)
     if (API_MODE) {
-      const session = await apiRequest<UploadSession>(`/requirements/${id}/attachments/uploads`, { method: 'POST', body: JSON.stringify({ fileName: file.name, contentType: file.type, totalSize: file.size, forComment }) })
+      const session = await apiRequest<UploadSession>(`/requirements/${id}/attachments/uploads`, { method: 'POST', body: JSON.stringify({ fileName: file.name, contentType, totalSize: file.size, forComment }) })
       for (let index = 0; index < session.totalChunks; index++) {
         const start = index * session.chunkSize; const chunk = file.slice(start, Math.min(file.size, start + session.chunkSize))
         await apiRequest<void>(`/attachments/uploads/${session.uploadId}/chunks/${index}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk })
@@ -356,7 +374,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
       return completed.attachment
     }
     for (const progress of [8, 30, 52, 74, 96, 100]) { onProgress?.(progress); await wait(90) }
-    const attachment: Attachment = { id: uuid(), name: file.name, size: file.size, type: file.type, uploadedBy: currentUser.id, createdAt: nowIso() }
+    const attachment: Attachment = { id: uuid(), name: file.name, size: file.size, type: contentType, uploadedBy: currentUser.id, createdAt: nowIso() }
     await saveAttachmentBlob(attachment.id, file)
     if (forComment) { commentImages.current.set(attachment.id, attachment); return attachment }
     setData((previous) => ({ ...previous, requirements: previous.requirements.map((item) => item.id === id ? { ...item, attachments: [...item.attachments, attachment], updatedAt: nowIso(), version: (item.version ?? 1) + 1 } : item) }))
@@ -532,7 +550,7 @@ export function AppStoreProvider({ children }: PropsWithChildren) {
 
   const resetDemo = useCallback(async () => { if (API_MODE) await refresh(); else { await clearAttachmentBlobs(); setData(cloneInitialData()) } }, [refresh])
 
-  const value = useMemo<AppStoreValue>(() => ({ ...data, currentUser, mode: API_MODE ? 'api' : 'mock', authenticated, initializing, lastOperationError, login, logout, refresh, createRequirement, updateRequirement, moveRequirementStatus, deleteRequirement, addComment, uploadAttachment, deleteAttachment, loadAttachmentBlob, setCurrentUser, updateUserRole, createUser, validateWeComEmail, bindWeComUser, unbindWeComUser, updateUser, deleteUser, addModule, renameModule, setStatusProtection, reorderStatuses, removeModule, addStatus, renameStatus, removeStatus, addCustomField, toggleCustomField, addRequirementType, updateRequirementType, updateRequirementDefaults, updateBranding, uploadBrandingBackground, getWorkCalendar, updateWorkCalendar, queryRequirementTree, importRequirements, resetDemo }), [data, currentUser, authenticated, initializing, lastOperationError, login, logout, refresh, createRequirement, updateRequirement, moveRequirementStatus, deleteRequirement, addComment, uploadAttachment, deleteAttachment, loadAttachmentBlob, setCurrentUser, updateUserRole, createUser, validateWeComEmail, bindWeComUser, unbindWeComUser, updateUser, deleteUser, addModule, renameModule, setStatusProtection, reorderStatuses, removeModule, addStatus, renameStatus, removeStatus, addCustomField, toggleCustomField, addRequirementType, updateRequirementType, updateRequirementDefaults, updateBranding, uploadBrandingBackground, getWorkCalendar, updateWorkCalendar, queryRequirementTree, importRequirements, resetDemo])
+  const value = useMemo<AppStoreValue>(() => ({ ...data, currentUser, mode: API_MODE ? 'api' : 'mock', authenticated, initializing, lastOperationError, login, logout, refresh, createRequirement, updateRequirement, moveRequirementStatus, deleteRequirement, addComment, deleteComment, uploadAttachment, deleteAttachment, loadAttachmentBlob, setCurrentUser, updateUserRole, createUser, validateWeComEmail, bindWeComUser, unbindWeComUser, updateUser, deleteUser, addModule, renameModule, setStatusProtection, reorderStatuses, removeModule, addStatus, renameStatus, removeStatus, addCustomField, toggleCustomField, addRequirementType, updateRequirementType, updateRequirementDefaults, updateBranding, uploadBrandingBackground, getWorkCalendar, updateWorkCalendar, queryRequirementTree, importRequirements, resetDemo }), [data, currentUser, authenticated, initializing, lastOperationError, login, logout, refresh, createRequirement, updateRequirement, moveRequirementStatus, deleteRequirement, addComment, deleteComment, uploadAttachment, deleteAttachment, loadAttachmentBlob, setCurrentUser, updateUserRole, createUser, validateWeComEmail, bindWeComUser, unbindWeComUser, updateUser, deleteUser, addModule, renameModule, setStatusProtection, reorderStatuses, removeModule, addStatus, renameStatus, removeStatus, addCustomField, toggleCustomField, addRequirementType, updateRequirementType, updateRequirementDefaults, updateBranding, uploadBrandingBackground, getWorkCalendar, updateWorkCalendar, queryRequirementTree, importRequirements, resetDemo])
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>
 }
 

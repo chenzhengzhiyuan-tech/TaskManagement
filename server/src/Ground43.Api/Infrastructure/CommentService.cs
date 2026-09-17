@@ -14,7 +14,7 @@ public sealed class CommentService(AppDbContext db, CommentNotificationService n
         var content = request.Content ?? "";
         var mentions = (request.Mentions ?? []).OrderBy(x => x.Start).ToArray();
         var attachmentIds = (request.AttachmentIds ?? []).Distinct().Order().ToArray();
-        if (string.IsNullOrWhiteSpace(content) && attachmentIds.Length == 0) return Invalid("请输入评论或添加图片");
+        if (string.IsNullOrWhiteSpace(content) && attachmentIds.Length == 0) return Invalid("请输入评论或添加附件");
         if (content.Length > 100_000 || mentions.Length > 100 || attachmentIds.Length > 100) return Invalid("评论内容过长，请分条发送");
         var commentId = request.RequestId ?? Guid.NewGuid();
         if (commentId == Guid.Empty) return Invalid("评论提交标识无效");
@@ -46,7 +46,7 @@ public sealed class CommentService(AppDbContext db, CommentNotificationService n
         }
         var images = await db.Attachments.Where(x => attachmentIds.Contains(x.Id)).ToListAsync(ct);
         if (images.Count != attachmentIds.Length || images.Any(x => x.RequirementId != requirementId || x.UploadedById != userId || !x.ForComment || x.CommentId != null))
-            return Invalid("评论图片已失效或不属于当前评论，请重新上传");
+            return Invalid("评论附件已失效或不属于当前评论，请重新上传");
         var now = DateTimeOffset.UtcNow;
         var comment = new CommentEntity { Id = commentId, RequirementId = requirementId, AuthorId = userId, Content = content, MentionsJson = mentionsJson, CreatedAt = now };
         db.Comments.Add(comment);
@@ -55,12 +55,12 @@ public sealed class CommentService(AppDbContext db, CommentNotificationService n
         {
             var changed = await db.Attachments.Where(x => x.Id == image.Id && x.CommentId == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.CommentId, commentId), ct);
-            if (changed != 1) return Results.Conflict(new { message = "图片已被另一条评论使用，请刷新" });
+            if (changed != 1) return Results.Conflict(new { message = "附件已被另一条评论使用，请刷新" });
             image.CommentId = commentId;
         }
         var summary = content.Trim();
         db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = requirementId, ActorId = userId,
-            Action = "添加评论", Detail = summary.Length == 0 ? $"添加了 {images.Count} 张图片" : summary.Length > 60 ? summary[..60] + "…" : summary, CreatedAt = now });
+            Action = "添加评论", Detail = summary.Length == 0 ? $"添加了 {images.Count} 个附件" : summary.Length > 60 ? summary[..60] + "…" : summary, CreatedAt = now });
         requirement.UpdatedAt = now; requirement.Version++;
         var author = await db.Users.SingleAsync(x => x.Id == userId, ct);
         notifications.Enqueue(comment, requirement, author, recipients);

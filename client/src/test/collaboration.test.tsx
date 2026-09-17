@@ -103,7 +103,7 @@ it('图片评论提交失败保留草稿，重试复用图片和提交标识', a
   const store = useAppStore()
   vi.mocked(store.addComment).mockRejectedValueOnce(new Error('连接中断')).mockResolvedValue(undefined)
   render(<CommentsPanel requirement={{ ...store.requirements[0], comments: [] }} visible onDirtyChange={() => {}} onOpenImage={() => {}} onDownloadImage={() => {}} />)
-  fireEvent.change(screen.getByLabelText('评论图片'), { target: { files: [new File(['test'], 'test.png', { type: 'image/png' })] } })
+  fireEvent.change(screen.getByLabelText('评论附件'), { target: { files: [new File(['test'], 'test.png', { type: 'image/png' })] } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await screen.findByRole('alert')
   fireEvent.click(screen.getByRole('button', { name: '发送' }))

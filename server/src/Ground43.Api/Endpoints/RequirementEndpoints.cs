@@ -24,6 +24,7 @@ public static class RequirementEndpoints
         group.MapPatch("/{id}", UpdateAsync);
         group.MapDelete("/{id}", DeleteAsync).RequireAuthorization("Admin");
         group.MapPost("/{id}/comments", AddCommentAsync);
+        group.MapDelete("/{id}/comments/{commentId:guid}", DeleteCommentAsync);
         return app;
     }
 
@@ -322,6 +323,28 @@ public static class RequirementEndpoints
     private static Task<IResult> AddCommentAsync(string id, CreateCommentRequest request, HttpContext context, CommentService comments, CancellationToken ct)
         => comments.CreateAsync(id, request, context.User.UserId(), ct);
 
+    private static async Task<IResult> DeleteCommentAsync(string id, Guid commentId, HttpContext context, AppDbContext db, AttachmentStorage storage, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var comment = await db.Comments.SingleOrDefaultAsync(x => x.Id == commentId && x.RequirementId == id, ct);
+        if (comment is null) return Results.NotFound();
+        if (comment.AuthorId != context.User.UserId() && !context.User.IsInRole(Roles.Admin)) return Results.Forbid();
+        var attachments = await db.Attachments.Where(x => x.CommentId == commentId).ToListAsync(ct);
+        var requirement = await db.Requirements.SingleAsync(x => x.Id == id, ct);
+        var now = DateTimeOffset.UtcNow;
+        db.Attachments.RemoveRange(attachments);
+        db.Comments.Remove(comment);
+        requirement.Version++; requirement.UpdatedAt = now;
+        db.History.Add(new HistoryEntity { Id = Guid.NewGuid(), RequirementId = id, ActorId = context.User.UserId(), Action = "删除评论", Detail = $"删除评论及 {attachments.Count} 个附件", CreatedAt = now });
+        var prefix = $"comment-mention:{commentId}:";
+        await db.NotificationLogs.Where(x => x.IdempotencyKey != null && x.IdempotencyKey.StartsWith(prefix) && x.State != "sent")
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        foreach (var attachment in attachments) storage.DeleteFile(attachment.RelativePath);
+        return Results.NoContent();
+    }
+
     private static async Task<IResult?> ValidateAsync(RequirementEntity? current, string module, string priority, string statusId, string? assigneeId, string? iterationId, string? parentId, string? reviewerId, Guid? requirementTypeId, HttpContext context, AppDbContext db, CancellationToken ct)
     {
         if (!Priorities.Contains(priority)) return Results.BadRequest(new { message = "优先级无效" });
@@ -358,4 +381,3 @@ public static class RequirementEndpoints
     }
     private static string NormalizeJson(JsonElement? element) => !element.HasValue || element.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ? "{}" : element.Value.GetRawText();
 }
-

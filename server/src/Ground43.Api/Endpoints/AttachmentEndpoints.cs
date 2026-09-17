@@ -8,7 +8,7 @@ namespace Ground43.Api.Endpoints;
 
 public static class AttachmentEndpoints
 {
-    private static readonly HashSet<string> AllowedTypes = new(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/gif", "image/webp" };
+
 
     public static IEndpointRouteBuilder MapAttachmentEndpoints(this IEndpointRouteBuilder app)
     {
@@ -25,11 +25,12 @@ public static class AttachmentEndpoints
     private static async Task<IResult> CreateUploadAsync(string requirementId, CreateUploadRequest request, HttpContext context, AppDbContext db, AttachmentStorage storage, IOptions<StorageOptions> options, CancellationToken ct)
     {
         if (!await db.Requirements.AnyAsync(x => x.Id == requirementId, ct)) return Results.NotFound(new { message = "需求不存在" });
-        if (!AllowedTypes.Contains(request.ContentType)) return Results.BadRequest(new { message = "仅支持JPG、PNG、GIF和WebP图片" });
-        if (request.TotalSize <= 0 || request.TotalSize > options.Value.MaxAttachmentBytes) return Results.BadRequest(new { message = "附件大小必须在1字节至500MB之间" });
+        if (string.IsNullOrWhiteSpace(request.ContentType) || AttachmentMedia.Extension(request.ContentType) is null || !AttachmentMedia.MatchesName(request.FileName, request.ContentType)) return Results.BadRequest(new { message = "仅支持 JPG、PNG、WebP、GIF、MP4、WebM，扩展名与类型需一致" });
+        var limit = AttachmentMedia.Limit(request.ContentType, options.Value.MaxAttachmentBytes);
+        if (request.TotalSize <= 0 || request.TotalSize > limit) return Results.BadRequest(new { message = $"附件大小必须在 1 字节至 {limit / 1024 / 1024} MB 之间" });
         var chunkSize = Math.Clamp(request.ChunkSize ?? options.Value.ChunkSizeBytes, 1024 * 1024, 16 * 1024 * 1024);
         var now = DateTimeOffset.UtcNow;
-        var session = new UploadSessionEntity { Id = Guid.NewGuid(), RequirementId = requirementId, ForComment = request.ForComment, FileName = Path.GetFileName(request.FileName), ContentType = request.ContentType, TotalSize = request.TotalSize, ChunkSize = chunkSize, TotalChunks = (int)Math.Ceiling(request.TotalSize / (double)chunkSize), UploadedById = context.User.UserId(), CreatedAt = now, ExpiresAt = now.AddHours(options.Value.UploadSessionHours) };
+        var session = new UploadSessionEntity { Id = Guid.NewGuid(), RequirementId = requirementId, ForComment = request.ForComment, FileName = Path.GetFileName(request.FileName), ContentType = request.ContentType.ToLowerInvariant(), TotalSize = request.TotalSize, ChunkSize = chunkSize, TotalChunks = (int)Math.Ceiling(request.TotalSize / (double)chunkSize), UploadedById = context.User.UserId(), CreatedAt = now, ExpiresAt = now.AddHours(options.Value.UploadSessionHours) };
         Directory.CreateDirectory(storage.UploadDirectory(session.Id)); db.UploadSessions.Add(session); await db.SaveChangesAsync(ct);
         return Results.Created($"/api/attachments/uploads/{session.Id}", new CreateUploadResponse(session.Id, session.ChunkSize, session.TotalChunks, session.ExpiresAt));
     }
@@ -63,14 +64,14 @@ public static class AttachmentEndpoints
         if (session is null || session.CompletedAt is not null) return Results.NotFound();
         if (session.UploadedById != context.User.UserId() && !context.User.IsInRole(Roles.Admin)) return Results.Forbid();
         for (var i = 0; i < session.TotalChunks; i++) if (!File.Exists(storage.ChunkPath(uploadId, i))) return Results.BadRequest(new { message = $"缺少分片 {i}" });
-        var extension = Extension(session.ContentType); var attachmentId = Guid.NewGuid();
+        var extension = AttachmentMedia.Extension(session.ContentType)!; var attachmentId = Guid.NewGuid();
         string relativePath; string sha;
         try { (relativePath, sha) = await storage.AssembleAsync(uploadId, session.RequirementId, attachmentId, extension, session.TotalChunks, ct); }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { message = ex.Message }); }
         var full = storage.FullPath(relativePath);
-        if (new FileInfo(full).Length != session.TotalSize || !HasValidSignature(full, session.ContentType))
+        if (new FileInfo(full).Length != session.TotalSize || !AttachmentMedia.HasValidSignature(full, session.ContentType))
         {
-            storage.DeleteFile(relativePath); return Results.BadRequest(new { message = "文件大小或图片格式校验失败" });
+            storage.DeleteFile(relativePath); return Results.BadRequest(new { message = "文件大小或附件格式校验失败" });
         }
         var entity = new AttachmentEntity { ForComment = session.ForComment, Id = attachmentId, RequirementId = session.RequirementId, Name = session.FileName, Size = session.TotalSize, ContentType = session.ContentType, RelativePath = relativePath, Sha256 = sha, UploadedById = session.UploadedById, CreatedAt = DateTimeOffset.UtcNow };
         db.Attachments.Add(entity); session.CompletedAt = DateTimeOffset.UtcNow;
@@ -92,7 +93,7 @@ public static class AttachmentEndpoints
     {
         var attachment = await db.Attachments.FindAsync([id], ct); if (attachment is null) return Results.NotFound();
         if (attachment.UploadedById != context.User.UserId() && !context.User.IsInRole(Roles.Admin)) return Results.Forbid();
-        if (attachment.CommentId != null) return Results.BadRequest(new { message = "评论图片不能单独删除" });
+        if (attachment.CommentId != null) return Results.BadRequest(new { message = "评论附件不能单独删除，请删除所属评论" });
         var requirement = await db.Requirements.FindAsync([attachment.RequirementId], ct);
         if (requirement is not null && !attachment.ForComment) { requirement.Version++; requirement.UpdatedAt = DateTimeOffset.UtcNow; }
         db.Attachments.Remove(attachment);
@@ -110,17 +111,4 @@ public static class AttachmentEndpoints
         return Results.File(path, attachment.ContentType, download == true ? attachment.Name : null, enableRangeProcessing: true);
     }
 
-    private static string Extension(string type) => type.ToLowerInvariant() switch { "image/jpeg" => ".jpg", "image/png" => ".png", "image/gif" => ".gif", "image/webp" => ".webp", _ => ".bin" };
-    private static bool HasValidSignature(string path, string type)
-    {
-        Span<byte> header = stackalloc byte[12]; using var stream = File.OpenRead(path); var read = stream.Read(header); if (read < 6) return false;
-        return type.ToLowerInvariant() switch
-        {
-            "image/jpeg" => header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF,
-            "image/png" => header[..8].SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
-            "image/gif" => System.Text.Encoding.ASCII.GetString(header[..6]) is "GIF87a" or "GIF89a",
-            "image/webp" => System.Text.Encoding.ASCII.GetString(header[..4]) == "RIFF" && System.Text.Encoding.ASCII.GetString(header[8..12]) == "WEBP",
-            _ => false
-        };
-    }
 }
